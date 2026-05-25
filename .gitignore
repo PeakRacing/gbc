@@ -53,3 +53,9 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# xmake/build outputs
+.xmake/
+build/
+**/.xmake/
+**/build/
