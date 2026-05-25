@@ -59,6 +59,62 @@ static void gbc_mmu_do_dma(gbc_t *gbc, uint8_t data)
     for (uint16_t i = 0; i < 0xA0; i++) {
         gbc->mmu.oam[i] = gbc_mmu_read(gbc, (uint16_t)(src + i));
     }
+    gbc->mmu.oam_dma_cycles = 160U * 4U;
+}
+
+static uint8_t gbc_mmu_oam_dma_blocks(gbc_t *gbc, uint16_t addr)
+{
+    return (uint8_t)(gbc->mmu.oam_dma_cycles != 0 && addr < 0xFF80);
+}
+
+static uint16_t gbc_mmu_hdma_src_from_regs(gbc_t *gbc)
+{
+    return (uint16_t)(((uint16_t)gbc->mmu.io[0x51] << 8) | (gbc->mmu.io[0x52] & 0xF0));
+}
+
+static uint16_t gbc_mmu_hdma_dst_from_regs(gbc_t *gbc)
+{
+    return (uint16_t)(0x8000 | (((uint16_t)gbc->mmu.io[0x53] & 0x1F) << 8) | (gbc->mmu.io[0x54] & 0xF0));
+}
+
+static void gbc_mmu_hdma_copy_block(gbc_t *gbc)
+{
+    for (uint8_t i = 0; i < 16; i++) {
+        gbc->mmu.vram[gbc->mmu.vram_bank][(gbc->mmu.hdma_dst + i) & 0x1FFF] =
+            gbc_mmu_read(gbc, (uint16_t)(gbc->mmu.hdma_src + i));
+    }
+    gbc->mmu.hdma_src = (uint16_t)(gbc->mmu.hdma_src + 16);
+    gbc->mmu.hdma_dst = (uint16_t)(0x8000 | ((gbc->mmu.hdma_dst + 16) & 0x1FFF));
+    if (gbc->mmu.hdma_blocks > 0) {
+        gbc->mmu.hdma_blocks--;
+    }
+    gbc->mmu.io[0x51] = (uint8_t)(gbc->mmu.hdma_src >> 8);
+    gbc->mmu.io[0x52] = (uint8_t)(gbc->mmu.hdma_src & 0xF0);
+    gbc->mmu.io[0x53] = (uint8_t)((gbc->mmu.hdma_dst >> 8) & 0x1F);
+    gbc->mmu.io[0x54] = (uint8_t)(gbc->mmu.hdma_dst & 0xF0);
+    if (gbc->mmu.hdma_blocks == 0) {
+        gbc->mmu.hdma_active = 0;
+        gbc->mmu.io[0x55] = 0xFF;
+    } else {
+        gbc->mmu.io[0x55] = (uint8_t)(gbc->mmu.hdma_blocks - 1);
+    }
+}
+
+static void gbc_mmu_hdma_start(gbc_t *gbc, uint8_t data)
+{
+    gbc->mmu.hdma_src = gbc_mmu_hdma_src_from_regs(gbc);
+    gbc->mmu.hdma_dst = gbc_mmu_hdma_dst_from_regs(gbc);
+    gbc->mmu.hdma_blocks = (uint8_t)((data & 0x7F) + 1);
+
+    if ((data & 0x80) == 0) {
+        while (gbc->mmu.hdma_blocks != 0) {
+            gbc_mmu_hdma_copy_block(gbc);
+        }
+        return;
+    }
+
+    gbc->mmu.hdma_active = 1;
+    gbc->mmu.io[0x55] = (uint8_t)(gbc->mmu.hdma_blocks - 1);
 }
 
 static void gbc_mmu_write_io(gbc_t *gbc, uint8_t reg, uint8_t data)
@@ -75,6 +131,9 @@ static void gbc_mmu_write_io(gbc_t *gbc, uint8_t reg, uint8_t data)
         return;
     case 0x04:
         gbc_timer_write_div(gbc);
+        return;
+    case 0x07:
+        gbc_timer_write_tac(gbc, data);
         return;
     case 0x0F:
         gbc->mmu.io[reg] = data | 0xE0;
@@ -115,19 +174,18 @@ static void gbc_mmu_write_io(gbc_t *gbc, uint8_t reg, uint8_t data)
             gbc->ppu.obpi = (uint8_t)(0x80 | ((gbc->ppu.obpi + 1) & 0x3F));
         }
         return;
-    case 0x55: {
-        /* CGB HDMA: execute immediately (simplified — no cycle penalty) */
-        uint16_t src = (uint16_t)((gbc->mmu.io[0x51] << 8) | (gbc->mmu.io[0x52] & 0xF0));
-        uint16_t dst = (uint16_t)(0x8000 | (((uint16_t)gbc->mmu.io[0x53] & 0x1F) << 8) | (gbc->mmu.io[0x54] & 0xF0));
-        uint16_t len = (uint16_t)(((data & 0x7F) + 1) * 16);
-        uint16_t i;
-        for (i = 0; i < len; i++) {
-            gbc->mmu.vram[gbc->mmu.vram_bank][(dst + i) & 0x1FFF] =
-                gbc_mmu_read(gbc, (uint16_t)(src + i));
+    case 0x55:
+        if (gbc->model != GBC_MODEL_CGB) {
+            gbc->mmu.io[0x55] = 0xFF;
+            return;
         }
-        gbc->mmu.io[0x55] = 0xFF;  /* no active transfer */
+        if (gbc->mmu.hdma_active && ((data & 0x80) == 0)) {
+            gbc->mmu.hdma_active = 0;
+            gbc->mmu.io[0x55] = (uint8_t)(0x80 | (gbc->mmu.hdma_blocks - 1));
+            return;
+        }
+        gbc_mmu_hdma_start(gbc, data);
         return;
-    }
     case 0x70:
         gbc->mmu.wram_bank = data & 0x07;
         if (gbc->mmu.wram_bank == 0) {
@@ -152,6 +210,11 @@ void gbc_mmu_reset(gbc_t *gbc)
     gbc->mmu.ie = 0;
     gbc->mmu.vram_bank = 0;
     gbc->mmu.wram_bank = 1;
+    gbc->mmu.hdma_src = 0;
+    gbc->mmu.hdma_dst = 0x8000;
+    gbc->mmu.hdma_blocks = 0;
+    gbc->mmu.hdma_active = 0;
+    gbc->mmu.oam_dma_cycles = 0;
 
     gbc->mmu.io[0x00] = 0xCF;
     gbc->mmu.io[0x05] = 0x00;
@@ -199,6 +262,9 @@ void gbc_mmu_reset(gbc_t *gbc)
 
 uint8_t gbc_mmu_read(gbc_t *gbc, uint16_t addr)
 {
+    if (gbc_mmu_oam_dma_blocks(gbc, addr)) {
+        return 0xFF;
+    }
     if (addr < 0x8000) {
         return gbc_cart_read_rom(gbc, addr);
     }
@@ -234,6 +300,9 @@ uint8_t gbc_mmu_read(gbc_t *gbc, uint16_t addr)
 
 void gbc_mmu_write(gbc_t *gbc, uint16_t addr, uint8_t data)
 {
+    if (gbc_mmu_oam_dma_blocks(gbc, addr)) {
+        return;
+    }
     if (addr < 0x8000) {
         gbc_cart_write(gbc, addr, data);
         return;
@@ -279,5 +348,24 @@ void gbc_mmu_write(gbc_t *gbc, uint16_t addr, uint8_t data)
 void gbc_mmu_request_interrupt(gbc_t *gbc, uint8_t mask)
 {
     gbc->mmu.io[0x0F] |= mask;
+}
+
+void gbc_mmu_hdma_hblank(gbc_t *gbc)
+{
+    if (gbc->model == GBC_MODEL_CGB && gbc->mmu.hdma_active) {
+        gbc_mmu_hdma_copy_block(gbc);
+    }
+}
+
+void gbc_mmu_step_dma(gbc_t *gbc, uint16_t cycles)
+{
+    if (gbc->mmu.oam_dma_cycles == 0) {
+        return;
+    }
+    if (cycles >= gbc->mmu.oam_dma_cycles) {
+        gbc->mmu.oam_dma_cycles = 0;
+    } else {
+        gbc->mmu.oam_dma_cycles = (uint16_t)(gbc->mmu.oam_dma_cycles - cycles);
+    }
 }
 

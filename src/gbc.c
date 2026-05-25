@@ -117,6 +117,7 @@ uint8_t gbc_step(gbc_t *gbc)
      * at the correct rate relative to wall time. */
     {
         uint8_t sub_cycles = gbc->mmu.double_speed ? (uint8_t)(cycles >> 1) : cycles;
+        gbc_mmu_step_dma(gbc, cycles);
         gbc_timer_step(gbc, sub_cycles);
         gbc_ppu_step(gbc, sub_cycles);
         gbc_apu_step(gbc, sub_cycles);

@@ -67,6 +67,9 @@ static void gbc_ppu_set_mode(gbc_t *gbc, uint8_t mode)
         (mode == 2 && (stat & 0x20))) {
         gbc_mmu_request_interrupt(gbc, GBC_IF_LCD);
     }
+    if (mode == 0) {
+        gbc_mmu_hdma_hblank(gbc);
+    }
 }
 
 static uint8_t gbc_ppu_tile_pixel(gbc_t *gbc, uint16_t tile_addr, uint8_t x, uint8_t y, uint8_t bank)
@@ -155,14 +158,37 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
     uint8_t lcdc = gbc->mmu.io[0x40];
     uint8_t sprite_height = (lcdc & 0x04) ? 16 : 8;
     uint8_t bg_priority_enabled = !(gbc->model == GBC_MODEL_CGB && ((lcdc & 0x01) == 0));
-    uint8_t drawn = 0;
+    uint8_t sprites[10];
+    uint8_t sprite_count = 0;
 
     if ((lcdc & 0x02) == 0) {
         return;
     }
 
-    for (uint8_t i = 0; i < 40 && drawn < 10; i++) {
+    for (uint8_t i = 0; i < 40 && sprite_count < 10; i++) {
         uint8_t *oam = &gbc->mmu.oam[i * 4];
+        int16_t sy = (int16_t)oam[0] - 16;
+
+        if (ly >= sy && ly < sy + sprite_height) {
+            sprites[sprite_count++] = i;
+        }
+    }
+
+    if (gbc->model == GBC_MODEL_DMG) {
+        for (uint8_t i = 1; i < sprite_count; i++) {
+            uint8_t sprite = sprites[i];
+            uint8_t x = gbc->mmu.oam[(sprite * 4) + 1];
+            uint8_t j = i;
+            while (j > 0 && gbc->mmu.oam[(sprites[j - 1] * 4) + 1] > x) {
+                sprites[j] = sprites[j - 1];
+                j--;
+            }
+            sprites[j] = sprite;
+        }
+    }
+
+    for (uint8_t n = 0; n < sprite_count; n++) {
+        uint8_t *oam = &gbc->mmu.oam[sprites[n] * 4];
         int16_t sy = (int16_t)oam[0] - 16;
         int16_t sx = (int16_t)oam[1] - 8;
         uint8_t tile = oam[2];
@@ -170,10 +196,6 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
         uint8_t line;
         uint8_t bank = (gbc->model == GBC_MODEL_CGB && (attr & 0x08)) ? 1 : 0;
 
-        if (ly < sy || ly >= sy + sprite_height) {
-            continue;
-        }
-        drawn++;
         line = (uint8_t)(ly - sy);
         if (attr & 0x40) {
             line = (uint8_t)(sprite_height - 1 - line);

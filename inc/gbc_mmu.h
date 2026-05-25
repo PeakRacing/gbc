@@ -28,6 +28,11 @@ typedef struct {
     uint8_t wram_bank;
     uint8_t double_speed;
     uint8_t speed_prepare;
+    uint16_t hdma_src;
+    uint16_t hdma_dst;
+    uint8_t hdma_blocks;
+    uint8_t hdma_active;
+    uint16_t oam_dma_cycles;
 } gbc_mmu_t;
 
 struct gbc;
@@ -36,6 +41,8 @@ void gbc_mmu_reset(struct gbc *gbc);
 uint8_t gbc_mmu_read(struct gbc *gbc, uint16_t addr);
 void gbc_mmu_write(struct gbc *gbc, uint16_t addr, uint8_t data);
 void gbc_mmu_request_interrupt(struct gbc *gbc, uint8_t mask);
+void gbc_mmu_hdma_hblank(struct gbc *gbc);
+void gbc_mmu_step_dma(struct gbc *gbc, uint16_t cycles);
 
 #ifdef __cplusplus
     }
