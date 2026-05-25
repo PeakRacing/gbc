@@ -152,6 +152,204 @@ static uint16_t gbc_cart_mask_rom_bank(gbc_cart_t *cart, uint16_t bank, uint8_t 
     return bank;
 }
 
+static uint8_t gbc_cart_rtc_index(uint8_t select)
+{
+    return (select >= 0x08 && select <= 0x0C) ? (uint8_t)(select - 0x08) : 0xFF;
+}
+
+static uint16_t gbc_cart_rtc_days(gbc_cart_t *cart)
+{
+    return (uint16_t)(cart->rtc_regs[3] | ((uint16_t)(cart->rtc_regs[4] & 0x01) << 8));
+}
+
+static void gbc_cart_rtc_store_days(gbc_cart_t *cart, uint16_t days, uint8_t carry)
+{
+    cart->rtc_regs[3] = (uint8_t)days;
+    cart->rtc_regs[4] = (uint8_t)((cart->rtc_regs[4] & 0x40) | ((days >> 8) & 0x01) | carry);
+}
+
+static void gbc_cart_rtc_add_seconds(gbc_cart_t *cart, uint32_t seconds)
+{
+    uint32_t total;
+    uint32_t days;
+    uint8_t carry = cart->rtc_regs[4] & 0x80;
+
+    if (seconds == 0) {
+        return;
+    }
+
+    days = gbc_cart_rtc_days(cart);
+    total = (uint32_t)cart->rtc_regs[0] +
+            ((uint32_t)cart->rtc_regs[1] * 60UL) +
+            ((uint32_t)cart->rtc_regs[2] * 3600UL) +
+            (days * 86400UL) + seconds;
+    if (total >= (512UL * 86400UL)) {
+        carry = 0x80;
+        total %= (512UL * 86400UL);
+    }
+
+    cart->rtc_regs[0] = (uint8_t)(total % 60UL);
+    total /= 60UL;
+    cart->rtc_regs[1] = (uint8_t)(total % 60UL);
+    total /= 60UL;
+    cart->rtc_regs[2] = (uint8_t)(total % 24UL);
+    total /= 24UL;
+    gbc_cart_rtc_store_days(cart, (uint16_t)(total & 0x1FF), carry);
+}
+
+static void gbc_cart_rtc_sync(gbc_t *gbc)
+{
+    gbc_cart_t *cart = &gbc->cart;
+    uint32_t now;
+    uint32_t elapsed_ms;
+    uint32_t seconds;
+
+    if (!cart->header.has_timer) {
+        return;
+    }
+
+    now = gbc_get_ticks();
+    if (!cart->rtc_started) {
+        cart->rtc_last_ticks = now;
+        cart->rtc_started = 1;
+        return;
+    }
+
+    elapsed_ms = (uint32_t)(now - cart->rtc_last_ticks) + cart->rtc_ms;
+    cart->rtc_last_ticks = now;
+    if (cart->rtc_regs[4] & 0x40) {
+        cart->rtc_ms = 0;
+        return;
+    }
+
+    seconds = elapsed_ms / 1000UL;
+    cart->rtc_ms = (uint16_t)(elapsed_ms % 1000UL);
+    gbc_cart_rtc_add_seconds(cart, seconds);
+}
+
+static uint8_t gbc_cart_rtc_read(gbc_t *gbc)
+{
+    uint8_t index = gbc_cart_rtc_index(gbc->cart.rtc_select);
+
+    if (index == 0xFF || !gbc->cart.header.has_timer) {
+        return 0xFF;
+    }
+    gbc_cart_rtc_sync(gbc);
+    return gbc->cart.rtc_latched[index];
+}
+
+static void gbc_cart_rtc_write(gbc_t *gbc, uint8_t data)
+{
+    gbc_cart_t *cart = &gbc->cart;
+    uint8_t index = gbc_cart_rtc_index(cart->rtc_select);
+
+    if (index == 0xFF || !cart->header.has_timer) {
+        return;
+    }
+    gbc_cart_rtc_sync(gbc);
+    switch (index) {
+    case 0:
+    case 1:
+        data &= 0x3F;
+        if (data >= 60) {
+            data = (uint8_t)(data - 60);
+        }
+        break;
+    case 2:
+        data &= 0x1F;
+        if (data >= 24) {
+            data = (uint8_t)(data - 24);
+        }
+        break;
+    case 4:
+        data &= 0xC1;
+        break;
+    default:
+        break;
+    }
+    cart->rtc_regs[index] = data;
+    cart->rtc_latched[index] = data;
+    cart->rtc_ms = 0;
+    cart->rtc_last_ticks = gbc_get_ticks();
+    cart->rtc_started = 1;
+}
+
+static void gbc_cart_rtc_latch(gbc_t *gbc, uint8_t data)
+{
+    gbc_cart_t *cart = &gbc->cart;
+
+    if (!cart->header.has_timer) {
+        return;
+    }
+    if ((data & 0x01) && !cart->rtc_latch_prev) {
+        gbc_cart_rtc_sync(gbc);
+        gbc_memcpy(cart->rtc_latched, cart->rtc_regs, sizeof(cart->rtc_latched));
+    }
+    cart->rtc_latch_prev = data & 0x01;
+}
+
+#if (GBC_USE_FS == 1)
+static void gbc_cart_set_save_path(gbc_cart_t *cart, const char *file_path)
+{
+    int ret;
+
+    cart->save_path[0] = '\0';
+    if (file_path == NULL) {
+        return;
+    }
+    ret = snprintf(cart->save_path, sizeof(cart->save_path), "%s.sav", file_path);
+    if (ret < 0 || (size_t)ret >= sizeof(cart->save_path)) {
+        cart->save_path[0] = '\0';
+        GBC_LOG_WARN("save path is too long, battery RAM disabled\n");
+    }
+}
+
+static void gbc_cart_load_battery_ram(gbc_t *gbc)
+{
+    gbc_cart_t *cart = &gbc->cart;
+    FILE *fp;
+    size_t got;
+
+    if (!cart->header.has_battery || cart->ram_data == NULL || cart->ram_size == 0 || cart->save_path[0] == '\0') {
+        return;
+    }
+
+    fp = gbc_fopen(cart->save_path, "rb");
+    if (fp == NULL) {
+        return;
+    }
+    got = gbc_fread(cart->ram_data, 1, cart->ram_size, fp);
+    if (got != cart->ram_size) {
+        GBC_LOG_WARN("short battery RAM read: %u/%u bytes\n", (unsigned)got, (unsigned)cart->ram_size);
+    }
+    gbc_fclose(fp);
+}
+
+static void gbc_cart_save_battery_ram(gbc_t *gbc)
+{
+    gbc_cart_t *cart = &gbc->cart;
+    FILE *fp;
+    size_t wrote;
+
+    if (!cart->header.has_battery || cart->ram_data == NULL || cart->ram_size == 0 || cart->save_path[0] == '\0') {
+        return;
+    }
+
+    fp = gbc_fopen(cart->save_path, "wb");
+    if (fp == NULL) {
+        GBC_LOG_WARN("failed to open battery RAM save file\n");
+        return;
+    }
+    wrote = gbc_fwrite(cart->ram_data, 1, cart->ram_size, fp);
+    if (wrote != cart->ram_size) {
+        GBC_LOG_WARN("short battery RAM write: %u/%u bytes\n", (unsigned)wrote, (unsigned)cart->ram_size);
+    }
+    if (gbc_fclose(fp) != 0) {
+        GBC_LOG_WARN("failed to close battery RAM save file\n");
+    }
+}
+#endif
+
 int gbc_cart_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size, uint8_t take_ownership)
 {
     gbc_cart_t *cart;
@@ -187,6 +385,8 @@ int gbc_cart_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size, uint8_t tak
     cart->mbc1_low5 = 1;
     cart->mbc1_high2 = 0;
     cart->banking_mode = 0;
+    cart->rtc_last_ticks = gbc_get_ticks();
+    cart->rtc_started = 1;
 
     if (cart->header.ram_size != 0) {
         cart->ram_data = (uint8_t *)gbc_malloc((int)cart->header.ram_size);
@@ -269,6 +469,10 @@ int gbc_cart_load_file(gbc_t *gbc, const char *file_path)
     }
     gbc->cart.stream = fp;
     gbc_memset(gbc->cart.cache, 0, sizeof(gbc->cart.cache));
+#if (GBC_USE_FS == 1)
+    gbc_cart_set_save_path(&gbc->cart, file_path);
+    gbc_cart_load_battery_ram(gbc);
+#endif
     return GBC_OK;
 #else
     rom = (uint8_t *)gbc_malloc((int)size);
@@ -285,6 +489,9 @@ int gbc_cart_load_file(gbc_t *gbc, const char *file_path)
     int ret = gbc_cart_load_rom(gbc, rom, (uint32_t)size, 1);
     if (ret != GBC_OK) {
         gbc_free(rom);
+    } else {
+        gbc_cart_set_save_path(&gbc->cart, file_path);
+        gbc_cart_load_battery_ram(gbc);
     }
     return ret;
 #endif
@@ -299,6 +506,9 @@ void gbc_cart_unload(gbc_t *gbc)
         return;
     }
     cart = &gbc->cart;
+#if (GBC_USE_FS == 1)
+    gbc_cart_save_battery_ram(gbc);
+#endif
 #if (GBC_ROM_STREAM == 1)
     if (cart->stream != NULL) {
         gbc_fclose(cart->stream);
@@ -327,6 +537,8 @@ void gbc_cart_reset(gbc_t *gbc)
     cart->ram_bank = 0;
     cart->mbc1_low5 = 1;
     cart->mbc1_high2 = 0;
+    cart->rtc_select = 0;
+    cart->rtc_latch_prev = 0;
 }
 
 static const uint8_t *gbc_cart_bank_ptr(gbc_cart_t *cart, uint16_t bank)
@@ -402,7 +614,13 @@ uint8_t gbc_cart_read_ram(gbc_t *gbc, uint16_t addr)
     gbc_cart_t *cart = &gbc->cart;
     uint32_t offset;
 
-    if (!cart->ram_enable || cart->ram_data == NULL || cart->ram_size == 0) {
+    if (!cart->ram_enable) {
+        return 0xFF;
+    }
+    if (cart->header.mbc == GBC_MBC3 && gbc_cart_rtc_index(cart->rtc_select) != 0xFF) {
+        return gbc_cart_rtc_read(gbc);
+    }
+    if (cart->ram_data == NULL || cart->ram_size == 0) {
         return 0xFF;
     }
     offset = ((uint32_t)cart->ram_bank * GBC_RAM_BANK_SIZE) + (addr & 0x1FFF);
@@ -417,7 +635,14 @@ void gbc_cart_write_ram(gbc_t *gbc, uint16_t addr, uint8_t data)
     gbc_cart_t *cart = &gbc->cart;
     uint32_t offset;
 
-    if (!cart->ram_enable || cart->ram_data == NULL || cart->ram_size == 0) {
+    if (!cart->ram_enable) {
+        return;
+    }
+    if (cart->header.mbc == GBC_MBC3 && gbc_cart_rtc_index(cart->rtc_select) != 0xFF) {
+        gbc_cart_rtc_write(gbc, data);
+        return;
+    }
+    if (cart->ram_data == NULL || cart->ram_size == 0) {
         return;
     }
     offset = ((uint32_t)cart->ram_bank * GBC_RAM_BANK_SIZE) + (addr & 0x1FFF);
@@ -460,7 +685,14 @@ void gbc_cart_write(gbc_t *gbc, uint16_t addr, uint8_t data)
         } else if (addr < 0x4000) {
             cart->rom_bank = gbc_cart_mask_rom_bank(cart, data & 0x7F, 1);
         } else if (addr < 0x6000) {
-            cart->ram_bank = data & 0x03;
+            if (cart->header.has_timer && gbc_cart_rtc_index(data) != 0xFF) {
+                cart->rtc_select = data;
+            } else {
+                cart->rtc_select = 0;
+                cart->ram_bank = data & 0x03;
+            }
+        } else {
+            gbc_cart_rtc_latch(gbc, data);
         }
         return;
     case GBC_MBC5:

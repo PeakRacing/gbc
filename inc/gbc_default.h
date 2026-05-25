@@ -81,6 +81,10 @@
 #define GBC_APU_BUFFER_SAMPLES      (256)
 #endif
 
+#ifndef GBC_SAVE_PATH_MAX
+#define GBC_SAVE_PATH_MAX           (260)
+#endif
+
 #define GBC_WIDTH                   (160)
 #define GBC_HEIGHT                  (144)
 #define GBC_CPU_CLOCK_FREQ          (4194304UL)

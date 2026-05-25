@@ -30,13 +30,13 @@ target("gbc", function ()
     add_files("main.c")
 end)
 
-target("apu_test", function ()
+target("core_test", function ()
     set_kind("binary")
 
     local gbc_dir = "../.."
     add_includedirs(gbc_dir .. "/tests/port")
     add_includedirs(gbc_dir .. "/inc")
     add_files(gbc_dir .. "/src/**.c")
-    add_files(gbc_dir .. "/tests/apu_test.c")
+    add_files(gbc_dir .. "/tests/regression_test.c")
 end)
 

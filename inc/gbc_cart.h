@@ -75,6 +75,16 @@ typedef struct {
     uint8_t ram_bank;
     uint8_t mbc1_low5;
     uint8_t mbc1_high2;
+    uint8_t rtc_select;
+    uint8_t rtc_regs[5];
+    uint8_t rtc_latched[5];
+    uint8_t rtc_latch_prev;
+    uint8_t rtc_started;
+    uint16_t rtc_ms;
+    uint32_t rtc_last_ticks;
+#if (GBC_USE_FS == 1)
+    char save_path[GBC_SAVE_PATH_MAX];
+#endif
 #if (GBC_ROM_STREAM == 1)
     FILE *stream;
     gbc_rom_cache_t cache[GBC_ROM_CACHE_BANKS];

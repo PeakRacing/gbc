@@ -39,6 +39,7 @@ typedef struct {
     uint8_t ime;
     uint8_t ime_delay;
     uint8_t halted;
+    uint8_t halt_bug;
     uint8_t stopped;
     uint8_t last_opcode;
     uint32_t cycles;

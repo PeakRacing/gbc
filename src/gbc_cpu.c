@@ -16,7 +16,14 @@
 
 static uint8_t cpu_read8(gbc_t *gbc)
 {
-    return gbc_mmu_read(gbc, gbc->cpu.pc++);
+    uint8_t value = gbc_mmu_read(gbc, gbc->cpu.pc);
+
+    if (gbc->cpu.halt_bug) {
+        gbc->cpu.halt_bug = 0;
+    } else {
+        gbc->cpu.pc++;
+    }
+    return value;
 }
 
 static uint16_t cpu_read16(gbc_t *gbc)
@@ -284,7 +291,12 @@ uint8_t gbc_cpu_step(gbc_t *gbc)
 
     if (op >= 0x40 && op <= 0x7F) {
         if (op == 0x76) {
-            cpu->halted = 1;
+            uint8_t pending = (uint8_t)(gbc->mmu.ie & gbc->mmu.io[0x0F] & 0x1F);
+            if (!cpu->ime && pending != 0) {
+                cpu->halt_bug = 1;
+            } else {
+                cpu->halted = 1;
+            }
             cycles = 4;
         } else {
             cpu_set_r(gbc, (uint8_t)((op >> 3) & 7), cpu_get_r(gbc, op & 7));
