@@ -29,6 +29,14 @@
 #define GBC_WEAK                    __attribute__((weak))
 #endif
 
+#if defined(_MSC_VER)
+#define GBC_INLINE                  static __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#define GBC_INLINE                  static inline __attribute__((always_inline))
+#else
+#define GBC_INLINE                  static inline
+#endif
+
 #ifndef GBC_ENABLE_SOUND
 #define GBC_ENABLE_SOUND            (0)
 #endif

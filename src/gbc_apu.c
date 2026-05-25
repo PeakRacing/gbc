@@ -18,22 +18,22 @@ static const uint8_t gbc_apu_noise_divisors[8] = {
     8, 16, 32, 48, 64, 80, 96, 112
 };
 
-static uint16_t gbc_apu_square_period(uint16_t frequency)
+GBC_INLINE uint16_t gbc_apu_square_period(uint16_t frequency)
 {
     return (uint16_t)((2048 - (frequency & 0x07FF)) << 2);
 }
 
-static uint16_t gbc_apu_wave_period(uint16_t frequency)
+GBC_INLINE uint16_t gbc_apu_wave_period(uint16_t frequency)
 {
     return (uint16_t)((2048 - (frequency & 0x07FF)) << 1);
 }
 
-static uint32_t gbc_apu_noise_period(gbc_apu_noise_t *noise)
+GBC_INLINE uint32_t gbc_apu_noise_period(gbc_apu_noise_t *noise)
 {
     return (uint32_t)gbc_apu_noise_divisors[noise->divisor_code & 0x07] << noise->clock_shift;
 }
 
-static uint8_t gbc_apu_envelope_timer(uint8_t period)
+GBC_INLINE uint8_t gbc_apu_envelope_timer(uint8_t period)
 {
     return period == 0 ? 8 : period;
 }
@@ -339,7 +339,7 @@ static void gbc_apu_clock_frame_sequencer(gbc_t *gbc, uint8_t cycles)
     }
 }
 
-static int16_t gbc_apu_square_sample(gbc_apu_square_t *ch)
+GBC_INLINE int16_t gbc_apu_square_sample(gbc_apu_square_t *ch)
 {
     if (!ch->enabled || !ch->dac_enabled) {
         return 0;
@@ -350,7 +350,7 @@ static int16_t gbc_apu_square_sample(gbc_apu_square_t *ch)
     return ch->envelope_volume;
 }
 
-static int16_t gbc_apu_wave_sample(gbc_t *gbc)
+GBC_INLINE int16_t gbc_apu_wave_sample(gbc_t *gbc)
 {
     gbc_apu_wave_t *wave = &gbc->apu.wave;
     uint8_t packed;
@@ -373,7 +373,7 @@ static int16_t gbc_apu_wave_sample(gbc_t *gbc)
     return (int16_t)centered;
 }
 
-static int16_t gbc_apu_noise_sample(gbc_apu_noise_t *noise)
+GBC_INLINE int16_t gbc_apu_noise_sample(gbc_apu_noise_t *noise)
 {
     if (!noise->enabled || !noise->dac_enabled) {
         return 0;
@@ -386,28 +386,25 @@ static void gbc_apu_push_sample(gbc_t *gbc)
     gbc_apu_t *apu = &gbc->apu;
     uint8_t nr50 = gbc->mmu.io[0x24];
     uint8_t nr51 = gbc->mmu.io[0x25];
-    int16_t samples[4];
+    int16_t ch1 = gbc_apu_square_sample(&apu->square1);
+    int16_t ch2 = gbc_apu_square_sample(&apu->square2);
+    int16_t ch3 = gbc_apu_wave_sample(gbc);
+    int16_t ch4 = gbc_apu_noise_sample(&apu->noise);
     int16_t left = 0;
     int16_t right = 0;
     int32_t mixed_left;
     int32_t mixed_right;
     int16_t pcm_left;
     int16_t pcm_right;
-    uint8_t i;
 
-    samples[0] = gbc_apu_square_sample(&apu->square1);
-    samples[1] = gbc_apu_square_sample(&apu->square2);
-    samples[2] = gbc_apu_wave_sample(gbc);
-    samples[3] = gbc_apu_noise_sample(&apu->noise);
-
-    for (i = 0; i < 4; i++) {
-        if (nr51 & (uint8_t)(1U << i)) {
-            right = (int16_t)(right + samples[i]);
-        }
-        if (nr51 & (uint8_t)(1U << (i + 4))) {
-            left = (int16_t)(left + samples[i]);
-        }
-    }
+    if (nr51 & 0x01) right = (int16_t)(right + ch1);
+    if (nr51 & 0x02) right = (int16_t)(right + ch2);
+    if (nr51 & 0x04) right = (int16_t)(right + ch3);
+    if (nr51 & 0x08) right = (int16_t)(right + ch4);
+    if (nr51 & 0x10) left = (int16_t)(left + ch1);
+    if (nr51 & 0x20) left = (int16_t)(left + ch2);
+    if (nr51 & 0x40) left = (int16_t)(left + ch3);
+    if (nr51 & 0x80) left = (int16_t)(left + ch4);
 
     mixed_left = (int32_t)left * (((nr50 >> 4) & 0x07) + 1) * 24;
     mixed_right = (int32_t)right * ((nr50 & 0x07) + 1) * 24;

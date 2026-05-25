@@ -14,7 +14,7 @@
 #define CPU_H(cpu)       ((cpu)->hl.hi)
 #define CPU_L(cpu)       ((cpu)->hl.lo)
 
-static uint8_t cpu_read8(gbc_t *gbc)
+GBC_INLINE uint8_t cpu_read8(gbc_t *gbc)
 {
     uint8_t value = gbc_mmu_read(gbc, gbc->cpu.pc);
 
@@ -26,14 +26,14 @@ static uint8_t cpu_read8(gbc_t *gbc)
     return value;
 }
 
-static uint16_t cpu_read16(gbc_t *gbc)
+GBC_INLINE uint16_t cpu_read16(gbc_t *gbc)
 {
     uint8_t lo = cpu_read8(gbc);
     uint8_t hi = cpu_read8(gbc);
     return (uint16_t)(lo | (hi << 8));
 }
 
-static void cpu_push16(gbc_t *gbc, uint16_t value)
+GBC_INLINE void cpu_push16(gbc_t *gbc, uint16_t value)
 {
     gbc->cpu.sp--;
     gbc_mmu_write(gbc, gbc->cpu.sp, (uint8_t)(value >> 8));
@@ -41,14 +41,14 @@ static void cpu_push16(gbc_t *gbc, uint16_t value)
     gbc_mmu_write(gbc, gbc->cpu.sp, (uint8_t)value);
 }
 
-static uint16_t cpu_pop16(gbc_t *gbc)
+GBC_INLINE uint16_t cpu_pop16(gbc_t *gbc)
 {
     uint8_t lo = gbc_mmu_read(gbc, gbc->cpu.sp++);
     uint8_t hi = gbc_mmu_read(gbc, gbc->cpu.sp++);
     return (uint16_t)(lo | (hi << 8));
 }
 
-static uint8_t cpu_get_r(gbc_t *gbc, uint8_t r)
+GBC_INLINE uint8_t cpu_get_r(gbc_t *gbc, uint8_t r)
 {
     switch (r & 7) {
     case 0: return CPU_B(&gbc->cpu);
@@ -62,7 +62,7 @@ static uint8_t cpu_get_r(gbc_t *gbc, uint8_t r)
     }
 }
 
-static void cpu_set_r(gbc_t *gbc, uint8_t r, uint8_t value)
+GBC_INLINE void cpu_set_r(gbc_t *gbc, uint8_t r, uint8_t value)
 {
     switch (r & 7) {
     case 0: CPU_B(&gbc->cpu) = value; break;
@@ -76,7 +76,7 @@ static void cpu_set_r(gbc_t *gbc, uint8_t r, uint8_t value)
     }
 }
 
-static void cpu_set_flags(gbc_t *gbc, uint8_t z, uint8_t n, uint8_t h, uint8_t c)
+GBC_INLINE void cpu_set_flags(gbc_t *gbc, uint8_t z, uint8_t n, uint8_t h, uint8_t c)
 {
     uint8_t f = 0;
     if (z) f |= GBC_FLAG_Z;
@@ -86,7 +86,7 @@ static void cpu_set_flags(gbc_t *gbc, uint8_t z, uint8_t n, uint8_t h, uint8_t c
     CPU_F(&gbc->cpu) = f;
 }
 
-static void cpu_add(gbc_t *gbc, uint8_t value, uint8_t carry)
+GBC_INLINE void cpu_add(gbc_t *gbc, uint8_t value, uint8_t carry)
 {
     uint8_t a = CPU_A(&gbc->cpu);
     uint16_t result = (uint16_t)a + value + carry;
@@ -94,7 +94,7 @@ static void cpu_add(gbc_t *gbc, uint8_t value, uint8_t carry)
     CPU_A(&gbc->cpu) = (uint8_t)result;
 }
 
-static void cpu_sub(gbc_t *gbc, uint8_t value, uint8_t carry)
+GBC_INLINE void cpu_sub(gbc_t *gbc, uint8_t value, uint8_t carry)
 {
     uint8_t a = CPU_A(&gbc->cpu);
     uint16_t result = (uint16_t)a - value - carry;
@@ -102,32 +102,32 @@ static void cpu_sub(gbc_t *gbc, uint8_t value, uint8_t carry)
     CPU_A(&gbc->cpu) = (uint8_t)result;
 }
 
-static void cpu_and(gbc_t *gbc, uint8_t value)
+GBC_INLINE void cpu_and(gbc_t *gbc, uint8_t value)
 {
     CPU_A(&gbc->cpu) &= value;
     cpu_set_flags(gbc, CPU_A(&gbc->cpu) == 0, 0, 1, 0);
 }
 
-static void cpu_xor(gbc_t *gbc, uint8_t value)
+GBC_INLINE void cpu_xor(gbc_t *gbc, uint8_t value)
 {
     CPU_A(&gbc->cpu) ^= value;
     cpu_set_flags(gbc, CPU_A(&gbc->cpu) == 0, 0, 0, 0);
 }
 
-static void cpu_or(gbc_t *gbc, uint8_t value)
+GBC_INLINE void cpu_or(gbc_t *gbc, uint8_t value)
 {
     CPU_A(&gbc->cpu) |= value;
     cpu_set_flags(gbc, CPU_A(&gbc->cpu) == 0, 0, 0, 0);
 }
 
-static void cpu_cp(gbc_t *gbc, uint8_t value)
+GBC_INLINE void cpu_cp(gbc_t *gbc, uint8_t value)
 {
     uint8_t a = CPU_A(&gbc->cpu);
     uint16_t result = (uint16_t)a - value;
     cpu_set_flags(gbc, (uint8_t)result == 0, 1, (a & 0x0F) < (value & 0x0F), a < value);
 }
 
-static uint8_t cpu_inc8(gbc_t *gbc, uint8_t value)
+GBC_INLINE uint8_t cpu_inc8(gbc_t *gbc, uint8_t value)
 {
     uint8_t result = (uint8_t)(value + 1);
     uint8_t c = CPU_F(&gbc->cpu) & GBC_FLAG_C;
@@ -135,7 +135,7 @@ static uint8_t cpu_inc8(gbc_t *gbc, uint8_t value)
     return result;
 }
 
-static uint8_t cpu_dec8(gbc_t *gbc, uint8_t value)
+GBC_INLINE uint8_t cpu_dec8(gbc_t *gbc, uint8_t value)
 {
     uint8_t result = (uint8_t)(value - 1);
     uint8_t c = CPU_F(&gbc->cpu) & GBC_FLAG_C;
@@ -143,7 +143,7 @@ static uint8_t cpu_dec8(gbc_t *gbc, uint8_t value)
     return result;
 }
 
-static void cpu_add_hl(gbc_t *gbc, uint16_t value)
+GBC_INLINE void cpu_add_hl(gbc_t *gbc, uint16_t value)
 {
     uint32_t result = (uint32_t)gbc->cpu.hl.w + value;
     uint8_t z = CPU_F(&gbc->cpu) & GBC_FLAG_Z;
@@ -151,7 +151,7 @@ static void cpu_add_hl(gbc_t *gbc, uint16_t value)
     gbc->cpu.hl.w = (uint16_t)result;
 }
 
-static uint8_t cpu_condition(gbc_t *gbc, uint8_t cc)
+GBC_INLINE uint8_t cpu_condition(gbc_t *gbc, uint8_t cc)
 {
     uint8_t f = CPU_F(&gbc->cpu);
     switch (cc & 3) {
@@ -299,12 +299,16 @@ uint8_t gbc_cpu_step(gbc_t *gbc)
             }
             cycles = 4;
         } else {
-            cpu_set_r(gbc, (uint8_t)((op >> 3) & 7), cpu_get_r(gbc, op & 7));
-            cycles = ((op & 7) == 6 || ((op >> 3) & 7) == 6) ? 8 : 4;
+            uint8_t dst = (uint8_t)((op >> 3) & 7);
+            uint8_t src = op & 7;
+            cpu_set_r(gbc, dst, cpu_get_r(gbc, src));
+            cycles = (src == 6 || dst == 6) ? 8 : 4;
         }
     } else if (op >= 0x80 && op <= 0xBF) {
-        uint8_t value = cpu_get_r(gbc, op & 7);
-        switch ((op >> 3) & 7) {
+        uint8_t src = op & 7;
+        uint8_t alu = (uint8_t)((op >> 3) & 7);
+        uint8_t value = cpu_get_r(gbc, src);
+        switch (alu) {
         case 0: cpu_add(gbc, value, 0); break;
         case 1: cpu_add(gbc, value, (CPU_F(cpu) & GBC_FLAG_C) ? 1 : 0); break;
         case 2: cpu_sub(gbc, value, 0); break;
@@ -314,7 +318,7 @@ uint8_t gbc_cpu_step(gbc_t *gbc)
         case 6: cpu_or(gbc, value); break;
         default: cpu_cp(gbc, value); break;
         }
-        cycles = ((op & 7) == 6) ? 8 : 4;
+        cycles = (src == 6) ? 8 : 4;
     } else {
         switch (op) {
         case 0x00: cycles = 4; break;

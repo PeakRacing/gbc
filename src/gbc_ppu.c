@@ -29,20 +29,20 @@ gbc_color_t gbc_ppu_color(uint8_t r5, uint8_t g5, uint8_t b5)
 #endif
 }
 
-static gbc_color_t gbc_ppu_dmg_color(uint8_t palette, uint8_t index)
+GBC_INLINE gbc_color_t gbc_ppu_dmg_color(uint8_t palette, uint8_t index)
 {
     uint8_t shade = (palette >> (index * 2)) & 0x03;
     return gbc_ppu_color(dmg_shades[shade][0], dmg_shades[shade][1], dmg_shades[shade][2]);
 }
 
-static gbc_color_t gbc_ppu_cgb_color(uint8_t *palette, uint8_t palette_id, uint8_t index)
+GBC_INLINE gbc_color_t gbc_ppu_cgb_color(uint8_t *palette, uint8_t palette_id, uint8_t index)
 {
     uint8_t base = (uint8_t)((palette_id * 8) + (index * 2));
     uint16_t raw = (uint16_t)(palette[base] | (palette[base + 1] << 8));
     return gbc_ppu_color(raw & 0x1F, (raw >> 5) & 0x1F, (raw >> 10) & 0x1F);
 }
 
-static uint8_t gbc_ppu_should_draw(gbc_t *gbc)
+GBC_INLINE uint8_t gbc_ppu_should_draw(gbc_t *gbc)
 {
 #if (GBC_FRAME_SKIP != 0)
     return gbc->gbc_frame_skip_count == 0;
@@ -72,7 +72,7 @@ static void gbc_ppu_set_mode(gbc_t *gbc, uint8_t mode)
     }
 }
 
-static uint8_t gbc_ppu_visible_sprite_count(gbc_t *gbc, uint8_t ly)
+GBC_INLINE uint8_t gbc_ppu_visible_sprite_count(gbc_t *gbc, uint8_t ly)
 {
     uint8_t lcdc = gbc->mmu.io[0x40];
     uint8_t sprite_height = (lcdc & 0x04) ? 16 : 8;
@@ -90,7 +90,7 @@ static uint8_t gbc_ppu_visible_sprite_count(gbc_t *gbc, uint8_t ly)
     return count;
 }
 
-static uint16_t gbc_ppu_mode3_end(gbc_t *gbc, uint8_t ly)
+GBC_INLINE uint16_t gbc_ppu_mode3_end(gbc_t *gbc, uint8_t ly)
 {
     uint16_t end = (uint16_t)(252 + (gbc->mmu.io[0x43] & 0x07) +
                               (gbc_ppu_visible_sprite_count(gbc, ly) * 6));
@@ -98,7 +98,7 @@ static uint16_t gbc_ppu_mode3_end(gbc_t *gbc, uint8_t ly)
     return end > 289 ? 289 : end;
 }
 
-static uint8_t gbc_ppu_tile_pixel(gbc_t *gbc, uint16_t tile_addr, uint8_t x, uint8_t y, uint8_t bank)
+GBC_INLINE uint8_t gbc_ppu_tile_pixel(gbc_t *gbc, uint16_t tile_addr, uint8_t x, uint8_t y, uint8_t bank)
 {
     uint16_t row = (uint16_t)(tile_addr + (y * 2));
     uint8_t lo = gbc->mmu.vram[bank][row & 0x1FFF];
@@ -110,11 +110,16 @@ static uint8_t gbc_ppu_tile_pixel(gbc_t *gbc, uint16_t tile_addr, uint8_t x, uin
 
 static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
 {
-    uint8_t lcdc = gbc->mmu.io[0x40];
-    uint8_t scy = gbc->mmu.io[0x42];
-    uint8_t scx = gbc->mmu.io[0x43];
-    uint8_t wy = gbc->mmu.io[0x4A];
-    uint8_t wx = gbc->mmu.io[0x4B];
+    gbc_mmu_t *mmu = &gbc->mmu;
+    gbc_ppu_t *ppu = &gbc->ppu;
+    uint8_t *vram0 = mmu->vram[0];
+    uint8_t *vram1 = mmu->vram[1];
+    gbc_model_t model = gbc->model;
+    uint8_t lcdc = mmu->io[0x40];
+    uint8_t scy = mmu->io[0x42];
+    uint8_t scx = mmu->io[0x43];
+    uint8_t wy = mmu->io[0x4A];
+    uint8_t wx = mmu->io[0x4B];
     uint8_t use_window = (uint8_t)((lcdc & 0x20) && ly >= wy && wx <= 166);
     uint16_t bg_map = (lcdc & 0x08) ? 0x1C00 : 0x1800;
     uint16_t win_map = (lcdc & 0x40) ? 0x1C00 : 0x1800;
@@ -137,16 +142,16 @@ static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
 
         if (use_window && x + 7 >= wx) {
             pixel_x = (uint8_t)(x + 7 - wx);
-            pixel_y = gbc->ppu.win_line;
+            pixel_y = ppu->win_line;
             map = win_map;
             win_used = 1;
         }
 
         tile_x = (uint8_t)(pixel_x / 8);
         tile_y = (uint8_t)(pixel_y / 8);
-        tile_no = gbc->mmu.vram[0][map + (tile_y * 32) + tile_x];
-        if (gbc->model == GBC_MODEL_CGB) {
-            attr = gbc->mmu.vram[1][map + (tile_y * 32) + tile_x];
+        tile_no = vram0[map + (tile_y * 32) + tile_x];
+        if (model == GBC_MODEL_CGB) {
+            attr = vram1[map + (tile_y * 32) + tile_x];
             bank = (attr & 0x08) ? 1 : 0;
         }
 
@@ -158,7 +163,7 @@ static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
 
         tile_px = pixel_x & 7;
         tile_py = pixel_y & 7;
-        if (gbc->model == GBC_MODEL_CGB) {
+        if (model == GBC_MODEL_CGB) {
             if (attr & 0x20) {
                 tile_px = (uint8_t)(7 - tile_px);
             }
@@ -168,12 +173,12 @@ static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
         }
 
         color_id = gbc_ppu_tile_pixel(gbc, tile_addr, tile_px, tile_py, bank);
-        gbc->ppu.bg_color_id[x] = color_id;
-        gbc->ppu.bg_priority[x] = (gbc->model == GBC_MODEL_CGB && (attr & 0x80)) ? 1 : 0;
-        if (gbc->model == GBC_MODEL_CGB) {
-            gbc->ppu.line[x] = gbc_ppu_cgb_color(gbc->ppu.bg_palette, attr & 0x07, color_id);
+        ppu->bg_color_id[x] = color_id;
+        ppu->bg_priority[x] = (model == GBC_MODEL_CGB && (attr & 0x80)) ? 1 : 0;
+        if (model == GBC_MODEL_CGB) {
+            ppu->line[x] = gbc_ppu_cgb_color(ppu->bg_palette, attr & 0x07, color_id);
         } else {
-            gbc->ppu.line[x] = gbc_ppu_dmg_color(gbc->mmu.io[0x47], color_id);
+            ppu->line[x] = gbc_ppu_dmg_color(mmu->io[0x47], color_id);
         }
     }
     return win_used;
@@ -181,9 +186,13 @@ static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
 
 static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
 {
-    uint8_t lcdc = gbc->mmu.io[0x40];
+    gbc_mmu_t *mmu = &gbc->mmu;
+    gbc_ppu_t *ppu = &gbc->ppu;
+    uint8_t *oam_data = mmu->oam;
+    gbc_model_t model = gbc->model;
+    uint8_t lcdc = mmu->io[0x40];
     uint8_t sprite_height = (lcdc & 0x04) ? 16 : 8;
-    uint8_t bg_priority_enabled = !(gbc->model == GBC_MODEL_CGB && ((lcdc & 0x01) == 0));
+    uint8_t bg_priority_enabled = !(model == GBC_MODEL_CGB && ((lcdc & 0x01) == 0));
     uint8_t sprites[10];
     uint8_t sprite_count = 0;
 
@@ -192,7 +201,7 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
     }
 
     for (uint8_t i = 0; i < 40 && sprite_count < 10; i++) {
-        uint8_t *oam = &gbc->mmu.oam[i * 4];
+        uint8_t *oam = &oam_data[i * 4];
         int16_t sy = (int16_t)oam[0] - 16;
 
         if (ly >= sy && ly < sy + sprite_height) {
@@ -200,12 +209,12 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
         }
     }
 
-    if (gbc->model == GBC_MODEL_DMG) {
+    if (model == GBC_MODEL_DMG) {
         for (uint8_t i = 1; i < sprite_count; i++) {
             uint8_t sprite = sprites[i];
-            uint8_t x = gbc->mmu.oam[(sprite * 4) + 1];
+            uint8_t x = oam_data[(sprite * 4) + 1];
             uint8_t j = i;
-            while (j > 0 && gbc->mmu.oam[(sprites[j - 1] * 4) + 1] > x) {
+            while (j > 0 && oam_data[(sprites[j - 1] * 4) + 1] > x) {
                 sprites[j] = sprites[j - 1];
                 j--;
             }
@@ -214,13 +223,13 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
     }
 
     for (uint8_t n = 0; n < sprite_count; n++) {
-        uint8_t *oam = &gbc->mmu.oam[sprites[n] * 4];
+        uint8_t *oam = &oam_data[sprites[n] * 4];
         int16_t sy = (int16_t)oam[0] - 16;
         int16_t sx = (int16_t)oam[1] - 8;
         uint8_t tile = oam[2];
         uint8_t attr = oam[3];
         uint8_t line;
-        uint8_t bank = (gbc->model == GBC_MODEL_CGB && (attr & 0x08)) ? 1 : 0;
+        uint8_t bank = (model == GBC_MODEL_CGB && (attr & 0x08)) ? 1 : 0;
 
         line = (uint8_t)(ly - sy);
         if (attr & 0x40) {
@@ -237,24 +246,24 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
             if (screen_x < 0 || screen_x >= GBC_WIDTH) {
                 continue;
             }
-            if (gbc->ppu.obj_drawn[screen_x]) {
+            if (ppu->obj_drawn[screen_x]) {
                 continue;
             }
             color_id = gbc_ppu_tile_pixel(gbc, (uint16_t)(tile * 16), tx, line, bank);
             if (color_id == 0) {
                 continue;
             }
-            gbc->ppu.obj_drawn[screen_x] = 1;
-            if (bg_priority_enabled && (attr & 0x80) && gbc->ppu.bg_color_id[screen_x] != 0) {
+            ppu->obj_drawn[screen_x] = 1;
+            if (bg_priority_enabled && (attr & 0x80) && ppu->bg_color_id[screen_x] != 0) {
                 continue;
             }
-            if (bg_priority_enabled && gbc->model == GBC_MODEL_CGB && gbc->ppu.bg_priority[screen_x] && gbc->ppu.bg_color_id[screen_x] != 0) {
+            if (bg_priority_enabled && model == GBC_MODEL_CGB && ppu->bg_priority[screen_x] && ppu->bg_color_id[screen_x] != 0) {
                 continue;
             }
-            if (gbc->model == GBC_MODEL_CGB) {
-                gbc->ppu.line[screen_x] = gbc_ppu_cgb_color(gbc->ppu.obj_palette, attr & 0x07, color_id);
+            if (model == GBC_MODEL_CGB) {
+                ppu->line[screen_x] = gbc_ppu_cgb_color(ppu->obj_palette, attr & 0x07, color_id);
             } else {
-                gbc->ppu.line[screen_x] = gbc_ppu_dmg_color((attr & 0x10) ? gbc->mmu.io[0x49] : gbc->mmu.io[0x48], color_id);
+                ppu->line[screen_x] = gbc_ppu_dmg_color((attr & 0x10) ? mmu->io[0x49] : mmu->io[0x48], color_id);
             }
         }
     }
