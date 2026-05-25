@@ -10,8 +10,8 @@
 #endif
 
 #define GBC_ENABLE_SOUND            (0)       /* sound is disabled by default for MCU performance */
-#define GBC_APU_SAMPLE_RATE         (32000)   /* mono PCM sample rate when sound is enabled */
-#define GBC_APU_BUFFER_SAMPLES      (256)     /* S16LE samples per sound output batch */
+#define GBC_APU_SAMPLE_RATE         (32000)   /* stereo PCM sample rate when sound is enabled */
+#define GBC_APU_BUFFER_SAMPLES      (256)     /* interleaved S16LE stereo frames per output batch */
 #define GBC_ENABLE_DMG              (1)       /* support original GB/DMG cartridges */
 #define GBC_ENABLE_CGB              (1)       /* support GBC/CGB cartridges */
 

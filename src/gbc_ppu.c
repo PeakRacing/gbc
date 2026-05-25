@@ -72,6 +72,32 @@ static void gbc_ppu_set_mode(gbc_t *gbc, uint8_t mode)
     }
 }
 
+static uint8_t gbc_ppu_visible_sprite_count(gbc_t *gbc, uint8_t ly)
+{
+    uint8_t lcdc = gbc->mmu.io[0x40];
+    uint8_t sprite_height = (lcdc & 0x04) ? 16 : 8;
+    uint8_t count = 0;
+
+    if ((lcdc & 0x02) == 0) {
+        return 0;
+    }
+    for (uint8_t i = 0; i < 40 && count < 10; i++) {
+        int16_t sy = (int16_t)gbc->mmu.oam[i * 4] - 16;
+        if (ly >= sy && ly < sy + sprite_height) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static uint16_t gbc_ppu_mode3_end(gbc_t *gbc, uint8_t ly)
+{
+    uint16_t end = (uint16_t)(252 + (gbc->mmu.io[0x43] & 0x07) +
+                              (gbc_ppu_visible_sprite_count(gbc, ly) * 6));
+
+    return end > 289 ? 289 : end;
+}
+
 static uint8_t gbc_ppu_tile_pixel(gbc_t *gbc, uint16_t tile_addr, uint8_t x, uint8_t y, uint8_t bank)
 {
     uint16_t row = (uint16_t)(tile_addr + (y * 2));
@@ -251,6 +277,20 @@ void gbc_ppu_reset(gbc_t *gbc)
     }
 }
 
+void gbc_ppu_update_lyc(gbc_t *gbc)
+{
+    uint8_t stat = gbc->mmu.io[0x41];
+
+    if (gbc->mmu.io[0x44] == gbc->mmu.io[0x45]) {
+        if ((stat & 0x04) == 0 && (stat & 0x40)) {
+            gbc_mmu_request_interrupt(gbc, GBC_IF_LCD);
+        }
+        gbc->mmu.io[0x41] = stat | 0x04;
+    } else {
+        gbc->mmu.io[0x41] = stat & (uint8_t)~0x04;
+    }
+}
+
 void gbc_ppu_render_scanline(gbc_t *gbc, uint8_t ly)
 {
     gbc_color_t white = gbc_ppu_dmg_color(0xFC, 0);
@@ -326,14 +366,7 @@ void gbc_ppu_step(gbc_t *gbc, uint8_t cycles)
             gbc->ppu.frame_ready = 0;
         }
 
-        if (gbc->mmu.io[0x44] == gbc->mmu.io[0x45]) {
-            gbc->mmu.io[0x41] |= 0x04;
-            if (gbc->mmu.io[0x41] & 0x40) {
-                gbc_mmu_request_interrupt(gbc, GBC_IF_LCD);
-            }
-        } else {
-            gbc->mmu.io[0x41] &= (uint8_t)~0x04;
-        }
+        gbc_ppu_update_lyc(gbc);
     }
 
     /* Update LCD mode based on actual position within the current scanline.
@@ -344,7 +377,7 @@ void gbc_ppu_step(gbc_t *gbc, uint8_t cycles)
         uint8_t mode;
         if (gbc->ppu.dot_cycles < 80) {
             mode = 2;
-        } else if (gbc->ppu.dot_cycles < 252) {
+        } else if (gbc->ppu.dot_cycles < gbc_ppu_mode3_end(gbc, ly)) {
             mode = 3;
         } else {
             mode = 0;

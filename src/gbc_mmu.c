@@ -135,6 +135,12 @@ static void gbc_mmu_write_io(gbc_t *gbc, uint8_t reg, uint8_t data)
     case 0x07:
         gbc_timer_write_tac(gbc, data);
         return;
+    case 0x02:
+        gbc->mmu.io[reg] = (uint8_t)(data | 0x7E);
+        if ((data & 0x81) == 0x81) {
+            gbc->mmu.serial_cycles = 4096;
+        }
+        return;
     case 0x0F:
         gbc->mmu.io[reg] = data | 0xE0;
         return;
@@ -143,6 +149,11 @@ static void gbc_mmu_write_io(gbc_t *gbc, uint8_t reg, uint8_t data)
         return;
     case 0x44:
         gbc->mmu.io[reg] = 0;
+        gbc_ppu_update_lyc(gbc);
+        return;
+    case 0x45:
+        gbc->mmu.io[reg] = data;
+        gbc_ppu_update_lyc(gbc);
         return;
     case 0x46:
         gbc->mmu.io[reg] = data;
@@ -215,6 +226,7 @@ void gbc_mmu_reset(gbc_t *gbc)
     gbc->mmu.hdma_blocks = 0;
     gbc->mmu.hdma_active = 0;
     gbc->mmu.oam_dma_cycles = 0;
+    gbc->mmu.serial_cycles = 0;
 
     gbc->mmu.io[0x00] = 0xCF;
     gbc->mmu.io[0x05] = 0x00;
@@ -367,5 +379,20 @@ void gbc_mmu_step_dma(gbc_t *gbc, uint16_t cycles)
     } else {
         gbc->mmu.oam_dma_cycles = (uint16_t)(gbc->mmu.oam_dma_cycles - cycles);
     }
+}
+
+void gbc_mmu_step_serial(gbc_t *gbc, uint16_t cycles)
+{
+    if (gbc->mmu.serial_cycles == 0) {
+        return;
+    }
+    if (cycles < gbc->mmu.serial_cycles) {
+        gbc->mmu.serial_cycles = (uint16_t)(gbc->mmu.serial_cycles - cycles);
+        return;
+    }
+    gbc->mmu.serial_cycles = 0;
+    gbc->mmu.io[0x01] = 0xFF;
+    gbc->mmu.io[0x02] &= 0x7F;
+    gbc_mmu_request_interrupt(gbc, GBC_IF_SERIAL);
 }
 

@@ -40,3 +40,13 @@ target("core_test", function ()
     add_files(gbc_dir .. "/tests/regression_test.c")
 end)
 
+target("sound_test", function ()
+    set_kind("binary")
+
+    local gbc_dir = "../.."
+    add_includedirs(gbc_dir .. "/tests/sound_port")
+    add_includedirs(gbc_dir .. "/inc")
+    add_files(gbc_dir .. "/src/**.c")
+    add_files(gbc_dir .. "/tests/apu_regression_test.c")
+end)
+

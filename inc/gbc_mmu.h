@@ -33,6 +33,7 @@ typedef struct {
     uint8_t hdma_blocks;
     uint8_t hdma_active;
     uint16_t oam_dma_cycles;
+    uint16_t serial_cycles;
 } gbc_mmu_t;
 
 struct gbc;
@@ -43,6 +44,7 @@ void gbc_mmu_write(struct gbc *gbc, uint16_t addr, uint8_t data);
 void gbc_mmu_request_interrupt(struct gbc *gbc, uint8_t mask);
 void gbc_mmu_hdma_hblank(struct gbc *gbc);
 void gbc_mmu_step_dma(struct gbc *gbc, uint16_t cycles);
+void gbc_mmu_step_serial(struct gbc *gbc, uint16_t cycles);
 
 #ifdef __cplusplus
     }

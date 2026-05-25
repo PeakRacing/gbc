@@ -31,6 +31,7 @@ struct gbc;
 void gbc_ppu_reset(struct gbc *gbc);
 void gbc_ppu_step(struct gbc *gbc, uint8_t cycles);
 void gbc_ppu_render_scanline(struct gbc *gbc, uint8_t ly);
+void gbc_ppu_update_lyc(struct gbc *gbc);
 gbc_color_t gbc_ppu_color(uint8_t r5, uint8_t g5, uint8_t b5);
 
 #ifdef __cplusplus

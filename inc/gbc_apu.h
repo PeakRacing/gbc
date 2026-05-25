@@ -11,7 +11,7 @@
     extern "C" {
 #endif
 
-#define GBC_APU_SAMPLE_BYTES        (2)
+#define GBC_APU_SAMPLE_BYTES        (4)
 
 typedef struct {
     uint8_t enabled;
@@ -30,6 +30,7 @@ typedef struct {
     uint8_t sweep_period;
     uint8_t sweep_timer;
     uint8_t sweep_negate;
+    uint8_t sweep_negate_used;
     uint8_t sweep_shift;
 } gbc_apu_square_t;
 

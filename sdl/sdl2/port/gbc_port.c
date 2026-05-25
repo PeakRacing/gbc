@@ -164,7 +164,7 @@ int gbc_initex(gbc_t *gbc)
         SDL_zero(desired);
         desired.freq = GBC_APU_SAMPLE_RATE;
         desired.format = AUDIO_S16LSB;
-        desired.channels = 1;
+        desired.channels = 2;
         desired.samples = GBC_APU_BUFFER_SAMPLES;
         desired.callback = NULL;
         sdl_audio_device = SDL_OpenAudioDevice(NULL, SDL_FALSE, &desired, NULL, 0);

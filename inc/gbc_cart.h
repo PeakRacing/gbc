@@ -28,6 +28,7 @@ typedef enum {
 typedef enum {
     GBC_MBC_NONE = 0,
     GBC_MBC1,
+    GBC_MBC2,
     GBC_MBC3,
     GBC_MBC5,
 } gbc_mbc_type_t;
@@ -73,6 +74,7 @@ typedef struct {
     uint8_t banking_mode;
     uint16_t rom_bank;
     uint8_t ram_bank;
+    uint8_t mbc2_ram[512];
     uint8_t mbc1_low5;
     uint8_t mbc1_high2;
     uint8_t rtc_select;

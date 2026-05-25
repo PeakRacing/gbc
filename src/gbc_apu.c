@@ -94,6 +94,7 @@ static void gbc_apu_trigger_square(gbc_t *gbc, gbc_apu_square_t *ch, uint8_t ind
         ch->sweep_period = (nr10 >> 4) & 0x07;
         ch->sweep_timer = gbc_apu_envelope_timer(ch->sweep_period);
         ch->sweep_negate = (uint8_t)((nr10 & 0x08) != 0);
+        ch->sweep_negate_used = 0;
         ch->sweep_shift = nr10 & 0x07;
     }
     gbc_apu_sync_nr52(gbc);
@@ -292,8 +293,12 @@ static void gbc_apu_clock_sweep(gbc_t *gbc)
     }
     ch->sweep_timer = gbc_apu_envelope_timer(ch->sweep_period);
     delta = (uint16_t)(ch->shadow_frequency >> ch->sweep_shift);
-    next = ch->sweep_negate ? (uint16_t)(ch->shadow_frequency - delta) :
-                              (uint16_t)(ch->shadow_frequency + delta);
+    if (ch->sweep_negate) {
+        ch->sweep_negate_used = 1;
+        next = (uint16_t)(ch->shadow_frequency - delta);
+    } else {
+        next = (uint16_t)(ch->shadow_frequency + delta);
+    }
     if (next > 2047) {
         ch->enabled = 0;
     } else {
@@ -384,8 +389,10 @@ static void gbc_apu_push_sample(gbc_t *gbc)
     int16_t samples[4];
     int16_t left = 0;
     int16_t right = 0;
-    int32_t mixed;
-    int16_t pcm;
+    int32_t mixed_left;
+    int32_t mixed_right;
+    int16_t pcm_left;
+    int16_t pcm_right;
     uint8_t i;
 
     samples[0] = gbc_apu_square_sample(&apu->square1);
@@ -402,16 +409,26 @@ static void gbc_apu_push_sample(gbc_t *gbc)
         }
     }
 
-    mixed = ((int32_t)right * ((nr50 & 0x07) + 1) + (int32_t)left * (((nr50 >> 4) & 0x07) + 1)) * 24;
-    if (mixed > 32767) {
-        pcm = 32767;
-    } else if (mixed < -32768) {
-        pcm = -32768;
+    mixed_left = (int32_t)left * (((nr50 >> 4) & 0x07) + 1) * 24;
+    mixed_right = (int32_t)right * ((nr50 & 0x07) + 1) * 24;
+    if (mixed_left > 32767) {
+        pcm_left = 32767;
+    } else if (mixed_left < -32768) {
+        pcm_left = -32768;
     } else {
-        pcm = (int16_t)mixed;
+        pcm_left = (int16_t)mixed_left;
     }
-    apu->sample_buffer[apu->sample_index++] = (uint8_t)pcm;
-    apu->sample_buffer[apu->sample_index++] = (uint8_t)((uint16_t)pcm >> 8);
+    if (mixed_right > 32767) {
+        pcm_right = 32767;
+    } else if (mixed_right < -32768) {
+        pcm_right = -32768;
+    } else {
+        pcm_right = (int16_t)mixed_right;
+    }
+    apu->sample_buffer[apu->sample_index++] = (uint8_t)pcm_left;
+    apu->sample_buffer[apu->sample_index++] = (uint8_t)((uint16_t)pcm_left >> 8);
+    apu->sample_buffer[apu->sample_index++] = (uint8_t)pcm_right;
+    apu->sample_buffer[apu->sample_index++] = (uint8_t)((uint16_t)pcm_right >> 8);
     if (apu->sample_index >= sizeof(apu->sample_buffer)) {
         gbc_sound_output(apu->sample_buffer, apu->sample_index);
         apu->sample_index = 0;
@@ -474,6 +491,9 @@ void gbc_apu_write(gbc_t *gbc, uint8_t reg, uint8_t data)
     case 0x10:
         /* NR10: update CH1 sweep params immediately */
         apu->square1.sweep_period = (data >> 4) & 0x07;
+        if (apu->square1.sweep_negate && ((data & 0x08) == 0) && apu->square1.sweep_negate_used) {
+            apu->square1.enabled = 0;
+        }
         apu->square1.sweep_negate = (uint8_t)((data & 0x08) != 0);
         apu->square1.sweep_shift = data & 0x07;
         break;
