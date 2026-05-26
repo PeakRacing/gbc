@@ -53,6 +53,10 @@
 #define GBC_USE_FS                  (1)
 #endif
 
+#ifndef GBC_ENABLE_SRAM_SAVE
+#define GBC_ENABLE_SRAM_SAVE        (GBC_USE_FS)
+#endif
+
 #ifndef GBC_FRAME_SKIP
 #define GBC_FRAME_SKIP              (0)
 #endif

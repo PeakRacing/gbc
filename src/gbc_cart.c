@@ -295,7 +295,7 @@ static void gbc_cart_rtc_latch(gbc_t *gbc, uint8_t data)
     cart->rtc_latch_prev = data & 0x01;
 }
 
-#if (GBC_USE_FS == 1)
+#if (GBC_ENABLE_SRAM_SAVE == 1)
 static uint8_t *gbc_cart_battery_ram_ptr(gbc_cart_t *cart)
 {
     return (cart->header.mbc == GBC_MBC2) ? cart->mbc2_ram : cart->ram_data;
@@ -373,7 +373,7 @@ static void gbc_cart_save_battery_ram(gbc_t *gbc)
         GBC_LOG_WARN("failed to close battery RAM save file\n");
     }
 }
-#endif
+#endif /* GBC_ENABLE_SRAM_SAVE */
 
 int gbc_cart_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size, uint8_t take_ownership)
 {
@@ -495,7 +495,7 @@ int gbc_cart_load_file(gbc_t *gbc, const char *file_path)
     }
     gbc->cart.stream = fp;
     gbc_memset(gbc->cart.cache, 0, sizeof(gbc->cart.cache));
-#if (GBC_USE_FS == 1)
+#if (GBC_ENABLE_SRAM_SAVE == 1)
     gbc_cart_set_save_path(&gbc->cart, file_path);
     gbc_cart_load_battery_ram(gbc);
 #endif
@@ -516,8 +516,10 @@ int gbc_cart_load_file(gbc_t *gbc, const char *file_path)
     if (ret != GBC_OK) {
         gbc_free(rom);
     } else {
+#if (GBC_ENABLE_SRAM_SAVE == 1)
         gbc_cart_set_save_path(&gbc->cart, file_path);
         gbc_cart_load_battery_ram(gbc);
+#endif
     }
     return ret;
 #endif
@@ -532,7 +534,7 @@ void gbc_cart_unload(gbc_t *gbc)
         return;
     }
     cart = &gbc->cart;
-#if (GBC_USE_FS == 1)
+#if (GBC_ENABLE_SRAM_SAVE == 1)
     gbc_cart_save_battery_ram(gbc);
 #endif
 #if (GBC_ROM_STREAM == 1)

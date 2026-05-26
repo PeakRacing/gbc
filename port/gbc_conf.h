@@ -21,6 +21,7 @@
 #define GBC_RAM_LACK                (0)       /* 1: draw half-screen blocks to reduce RAM */
 
 #define GBC_USE_FS                  (1)       /* enable file based ROM loading */
+#define GBC_ENABLE_SRAM_SAVE        (1)       /* 1: save battery-backed RAM to .sav file; requires GBC_USE_FS=1 */
 #define GBC_ROM_STREAM              (0)       /* 1: stream ROM banks from file with LRU cache */
 #define GBC_ROM_CACHE_BANKS         (4)       /* 16KiB cache banks used when GBC_ROM_STREAM=1 */
 
