@@ -100,6 +100,13 @@ static void gbc_mmu_hdma_copy_block(gbc_t *gbc)
     }
 }
 
+/* A block takes 32 dots, or 32/64 CPU T-cycles at normal/double speed.
+ * https://gbdev.io/pandocs/CGB_Registers.html#transfer-timings */
+static uint8_t gbc_mmu_hdma_block_cycles(gbc_t *gbc)
+{
+    return gbc->mmu.double_speed ? 64 : 32;
+}
+
 static void gbc_mmu_hdma_start(gbc_t *gbc, uint8_t data)
 {
     gbc->mmu.hdma_src = gbc_mmu_hdma_src_from_regs(gbc);
@@ -107,9 +114,12 @@ static void gbc_mmu_hdma_start(gbc_t *gbc, uint8_t data)
     gbc->mmu.hdma_blocks = (uint8_t)((data & 0x7F) + 1);
 
     if ((data & 0x80) == 0) {
-        while (gbc->mmu.hdma_blocks != 0) {
-            gbc_mmu_hdma_copy_block(gbc);
-        }
+        /* General purpose transfer: the CPU is held off the bus until the
+         * whole transfer is done, so the blocks must not be copied here.  The
+         * first block still occupies the bus for its full transfer budget.
+         * FF55 reads back as 0xFF while the transfer is in flight. */
+        gbc->mmu.hdma_busy_cycles = gbc_mmu_hdma_block_cycles(gbc);
+        gbc->mmu.io[0x55] = 0xFF;
         return;
     }
 
@@ -192,13 +202,21 @@ static void gbc_mmu_write_io(gbc_t *gbc, uint8_t reg, uint8_t data)
         }
         if (gbc->mmu.hdma_active && ((data & 0x80) == 0)) {
             gbc->mmu.hdma_active = 0;
-            gbc->mmu.io[0x55] = (uint8_t)(0x80 | (gbc->mmu.hdma_blocks - 1));
+            /* A transfer is only ever active for the HBlank mode, where at
+             * least one block is always outstanding, so the decrement cannot
+             * underflow here.  Clamping keeps a corrupt state from reporting
+             * an impossible block count instead of failing silently. */
+            if (gbc->mmu.hdma_blocks > 0) {
+                gbc->mmu.io[0x55] = (uint8_t)(0x80 | (gbc->mmu.hdma_blocks - 1));
+            } else {
+                gbc->mmu.io[0x55] = 0xFF;
+            }
             return;
         }
         gbc_mmu_hdma_start(gbc, data);
         return;
     case 0x70:
-        gbc->mmu.wram_bank = data & 0x07;
+        gbc->mmu.wram_bank = (gbc->model == GBC_MODEL_CGB) ? (data & 0x07) : 1;
         if (gbc->mmu.wram_bank == 0) {
             gbc->mmu.wram_bank = 1;
         }
@@ -225,6 +243,7 @@ void gbc_mmu_reset(gbc_t *gbc)
     gbc->mmu.hdma_dst = 0x8000;
     gbc->mmu.hdma_blocks = 0;
     gbc->mmu.hdma_active = 0;
+    gbc->mmu.hdma_busy_cycles = 0;
     gbc->mmu.oam_dma_cycles = 0;
     gbc->mmu.serial_cycles = 0;
 
@@ -369,15 +388,44 @@ void gbc_mmu_hdma_hblank(gbc_t *gbc)
     }
 }
 
+uint8_t gbc_mmu_cpu_stalled(gbc_t *gbc)
+{
+    return (uint8_t)(gbc->mmu.hdma_busy_cycles != 0);
+}
+
 void gbc_mmu_step_dma(gbc_t *gbc, uint16_t cycles)
 {
+    uint16_t oam_cycles = cycles;
+
+    /* A general purpose HDMA transfer keeps the CPU off the bus.  Advance the
+     * block in flight and start the next one whenever its budget runs out.
+     * A zero budget has no work to do; looping on it would retire a cycle at
+     * a time and drive the transfer on with stalled time that never passed. */
+    if (cycles == 0) {
+        return;
+    }
+
+    while (cycles != 0 && gbc->mmu.hdma_busy_cycles != 0) {
+        uint8_t remaining = gbc->mmu.hdma_busy_cycles;
+        uint16_t spent = (cycles < remaining) ? cycles : remaining;
+
+        cycles = (uint16_t)(cycles - spent);
+        gbc->mmu.hdma_busy_cycles = (uint8_t)(remaining - spent);
+        if (gbc->mmu.hdma_busy_cycles == 0) {
+            gbc_mmu_hdma_copy_block(gbc);
+            if (gbc->mmu.hdma_blocks != 0) {
+                gbc->mmu.hdma_busy_cycles = gbc_mmu_hdma_block_cycles(gbc);
+            }
+        }
+    }
+
     if (gbc->mmu.oam_dma_cycles == 0) {
         return;
     }
-    if (cycles >= gbc->mmu.oam_dma_cycles) {
+    if (oam_cycles >= gbc->mmu.oam_dma_cycles) {
         gbc->mmu.oam_dma_cycles = 0;
     } else {
-        gbc->mmu.oam_dma_cycles = (uint16_t)(gbc->mmu.oam_dma_cycles - cycles);
+        gbc->mmu.oam_dma_cycles = (uint16_t)(gbc->mmu.oam_dma_cycles - oam_cycles);
     }
 }
 

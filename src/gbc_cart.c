@@ -295,7 +295,7 @@ static void gbc_cart_rtc_latch(gbc_t *gbc, uint8_t data)
     cart->rtc_latch_prev = data & 0x01;
 }
 
-#if (GBC_ENABLE_SRAM_SAVE == 1)
+#if (GBC_ENABLE_SRAM_SAVE == 1) && (GBC_USE_SRAM == 1)
 static uint8_t *gbc_cart_battery_ram_ptr(gbc_cart_t *cart)
 {
     return (cart->header.mbc == GBC_MBC2) ? cart->mbc2_ram : cart->ram_data;
@@ -404,7 +404,7 @@ int gbc_cart_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size, uint8_t tak
 
     cart->rom_data = rom;
     cart->rom_size = cart->header.rom_size;
-    cart->owns_rom = take_ownership;
+    cart->owns_rom = 0;
     cart->rom_bank = 1;
     cart->ram_bank = 0;
     cart->mbc1_low5 = 1;
@@ -414,6 +414,7 @@ int gbc_cart_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size, uint8_t tak
     cart->rtc_last_ticks = gbc_get_ticks();
     cart->rtc_started = 1;
 
+#if (GBC_USE_SRAM == 1)
     if (cart->header.ram_size != 0 && cart->header.mbc != GBC_MBC2) {
         cart->ram_data = (uint8_t *)gbc_malloc((int)cart->header.ram_size);
         if (cart->ram_data == NULL) {
@@ -424,6 +425,7 @@ int gbc_cart_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size, uint8_t tak
         cart->ram_size = cart->header.ram_size;
         cart->owns_ram = 1;
     }
+#endif
 
     if (cart->header.mode == GBC_CART_MODE_CGB_ONLY) {
         gbc->model = GBC_MODEL_CGB;
@@ -443,6 +445,7 @@ int gbc_cart_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size, uint8_t tak
                  (unsigned)(cart->header.rom_size / 1024),
                  (unsigned)(cart->header.ram_size / 1024),
                  gbc->model == GBC_MODEL_CGB ? "GBC" : "GB");
+    cart->owns_rom = take_ownership;
     return GBC_OK;
 }
 
@@ -495,7 +498,7 @@ int gbc_cart_load_file(gbc_t *gbc, const char *file_path)
     }
     gbc->cart.stream = fp;
     gbc_memset(gbc->cart.cache, 0, sizeof(gbc->cart.cache));
-#if (GBC_ENABLE_SRAM_SAVE == 1)
+#if (GBC_ENABLE_SRAM_SAVE == 1) && (GBC_USE_SRAM == 1)
     gbc_cart_set_save_path(&gbc->cart, file_path);
     gbc_cart_load_battery_ram(gbc);
 #endif
@@ -516,7 +519,7 @@ int gbc_cart_load_file(gbc_t *gbc, const char *file_path)
     if (ret != GBC_OK) {
         gbc_free(rom);
     } else {
-#if (GBC_ENABLE_SRAM_SAVE == 1)
+#if (GBC_ENABLE_SRAM_SAVE == 1) && (GBC_USE_SRAM == 1)
         gbc_cart_set_save_path(&gbc->cart, file_path);
         gbc_cart_load_battery_ram(gbc);
 #endif
@@ -534,7 +537,7 @@ void gbc_cart_unload(gbc_t *gbc)
         return;
     }
     cart = &gbc->cart;
-#if (GBC_ENABLE_SRAM_SAVE == 1)
+#if (GBC_ENABLE_SRAM_SAVE == 1) && (GBC_USE_SRAM == 1)
     gbc_cart_save_battery_ram(gbc);
 #endif
 #if (GBC_ROM_STREAM == 1)
@@ -639,6 +642,11 @@ uint8_t gbc_cart_read_rom(gbc_t *gbc, uint16_t addr)
 
 uint8_t gbc_cart_read_ram(gbc_t *gbc, uint16_t addr)
 {
+#if (GBC_USE_SRAM == 0)
+    (void)gbc;
+    (void)addr;
+    return 0xFF;
+#else
     gbc_cart_t *cart = &gbc->cart;
     uint32_t offset;
 
@@ -659,10 +667,17 @@ uint8_t gbc_cart_read_ram(gbc_t *gbc, uint16_t addr)
         return 0xFF;
     }
     return cart->ram_data[offset];
+#endif
 }
 
 void gbc_cart_write_ram(gbc_t *gbc, uint16_t addr, uint8_t data)
 {
+#if (GBC_USE_SRAM == 0)
+    (void)gbc;
+    (void)addr;
+    (void)data;
+    return;
+#else
     gbc_cart_t *cart = &gbc->cart;
     uint32_t offset;
 
@@ -684,6 +699,7 @@ void gbc_cart_write_ram(gbc_t *gbc, uint16_t addr, uint8_t data)
     if (offset < cart->ram_size) {
         cart->ram_data[offset] = data;
     }
+#endif
 }
 
 void gbc_cart_write(gbc_t *gbc, uint16_t addr, uint8_t data)

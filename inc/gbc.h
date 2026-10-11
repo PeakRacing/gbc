@@ -42,9 +42,14 @@ typedef struct gbc {
 #if (GBC_ENABLE_SOUND == 1)
     gbc_apu_t apu;
 #endif
+#if (GBC_FRAMEBUFFER_ENABLE == 1)
     gbc_color_t gbc_draw_data[GBC_DRAW_SIZE];
+#endif
 } gbc_t;
 
+/* Initialize caller-owned storage; release with gbc_deinit_static(). */
+int gbc_init_static(gbc_t *gbc);
+int gbc_deinit_static(gbc_t *gbc);
 gbc_t *gbc_init(void);
 int gbc_deinit(gbc_t *gbc);
 void gbc_run(gbc_t *gbc);
@@ -56,6 +61,7 @@ int gbc_load_file(gbc_t *gbc, const char *file_path);
 int gbc_unload_file(gbc_t *gbc);
 #endif
 
+/* Borrow ROM storage without copying; keep it valid until unload. */
 int gbc_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size);
 int gbc_unload_rom(gbc_t *gbc);
 int gbc_initex(gbc_t *gbc);

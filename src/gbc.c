@@ -22,38 +22,55 @@ static void gbc_reset(gbc_t *gbc)
     gbc_cpu_reset(gbc);
 }
 
+/** Initialize caller-owned emulator state without allocating its context. */
+int gbc_init_static(gbc_t *gbc)
+{
+    if (gbc == NULL) {
+        return GBC_ERROR;
+    }
+    gbc_memset(gbc, 0, sizeof(*gbc));
+    gbc->model = GBC_MODEL_DMG;
+#if (GBC_ENABLE_CGB == 1)
+    gbc->preferred_model = GBC_MODEL_CGB;
+#else
+    gbc->preferred_model = GBC_MODEL_DMG;
+#endif
+    gbc_reset(gbc);
+    return gbc_initex(gbc);
+}
+
 gbc_t *gbc_init(void)
 {
     gbc_t *gbc = (gbc_t *)gbc_malloc(sizeof(gbc_t));
-
     if (gbc == NULL) {
         return NULL;
     }
-    gbc_memset(gbc, 0, sizeof(gbc_t));
-    gbc->model = GBC_MODEL_DMG;
-    gbc->preferred_model =
-#if (GBC_ENABLE_CGB == 1)
-        GBC_MODEL_CGB;
-#else
-        GBC_MODEL_DMG;
-#endif
-    gbc_reset(gbc);
-    if (gbc_initex(gbc) != GBC_OK) {
+    if (gbc_init_static(gbc) != GBC_OK) {
         gbc_free(gbc);
         return NULL;
     }
     return gbc;
 }
 
-int gbc_deinit(gbc_t *gbc)
+/** Release cartridge/platform resources while retaining caller-owned storage. */
+int gbc_deinit_static(gbc_t *gbc)
 {
     if (gbc == NULL) {
         return GBC_ERROR;
     }
     gbc_cart_unload(gbc);
-    gbc_deinitex(gbc);
+    return gbc_deinitex(gbc);
+}
+
+int gbc_deinit(gbc_t *gbc)
+{
+    int ret;
+    if (gbc == NULL) {
+        return GBC_ERROR;
+    }
+    ret = gbc_deinit_static(gbc);
     gbc_free(gbc);
-    return GBC_OK;
+    return ret;
 }
 
 int gbc_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size)
@@ -112,14 +129,17 @@ uint8_t gbc_step(gbc_t *gbc)
         return 0;
     }
     cycles = gbc_cpu_step(gbc);
-    /* In CGB fast mode, the CPU runs at 8 MHz while PPU/timer still
-     * run at 4 MHz.  Halve the cycles passed to subsystems so they advance
+    /* In CGB fast mode, the CPU runs at 8 MHz while PPU/APU still
+     * run at 4 MHz. DIV/TIMA and serial follow the CPU clock.
+     * Halve the cycles passed to PPU/APU so they advance
      * at the correct rate relative to wall time. */
     {
         uint8_t sub_cycles = gbc->mmu.double_speed ? (uint8_t)(cycles >> 1) : cycles;
+        /* The HDMA stall is measured in CPU cycles: in fast mode the same
+         * number of them covers half the wall time. */
         gbc_mmu_step_dma(gbc, cycles);
-        gbc_mmu_step_serial(gbc, sub_cycles);
-        gbc_timer_step(gbc, sub_cycles);
+        gbc_mmu_step_serial(gbc, cycles);
+        gbc_timer_step(gbc, cycles);
         gbc_ppu_step(gbc, sub_cycles);
         gbc_apu_step(gbc, sub_cycles);
     }

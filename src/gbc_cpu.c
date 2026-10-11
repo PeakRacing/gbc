@@ -219,7 +219,7 @@ static uint8_t cpu_cb(gbc_t *gbc)
     return (r == 6) ? 16 : 8;
 }
 
-static uint8_t cpu_service_interrupt(gbc_t *gbc)
+static uint8_t cpu_service_interrupt(gbc_t *gbc, uint8_t ime)
 {
     static const uint16_t vectors[5] = {0x40, 0x48, 0x50, 0x58, 0x60};
     uint8_t pending = (uint8_t)(gbc->mmu.ie & gbc->mmu.io[0x0F] & 0x1F);
@@ -228,9 +228,10 @@ static uint8_t cpu_service_interrupt(gbc_t *gbc)
         return 0;
     }
     gbc->cpu.halted = 0;
-    if (!gbc->cpu.ime) {
+    if (ime == 0) {
         return 0;
     }
+    gbc->cpu.ime_delay = 0;
 
     for (uint8_t i = 0; i < 5; i++) {
         if (pending & (1U << i)) {
@@ -274,7 +275,15 @@ uint8_t gbc_cpu_step(gbc_t *gbc)
     gbc_cpu_t *cpu = &gbc->cpu;
     uint8_t delayed_ime = cpu->ime_delay;
     uint8_t op;
-    uint8_t cycles = cpu_service_interrupt(gbc);
+    uint8_t cycles;
+
+    /* DMA holds off interrupt stack accesses as well as opcode fetches. */
+    if (gbc_mmu_cpu_stalled(gbc)) {
+        cpu->cycles += 4;
+        return 4;
+    }
+
+    cycles = cpu_service_interrupt(gbc, cpu->ime);
 
     if (cycles != 0) {
         cpu->cycles += cycles;
@@ -284,8 +293,6 @@ uint8_t gbc_cpu_step(gbc_t *gbc)
         cpu->cycles += 4;
         return 4;
     }
-
-    cpu->ime_delay = 0;
     op = cpu_read8(gbc);
     cpu->last_opcode = op;
 
@@ -426,7 +433,7 @@ uint8_t gbc_cpu_step(gbc_t *gbc)
         case 0xD6: cpu_sub(gbc, cpu_read8(gbc), 0); cycles = 8; break;
         case 0xD7: cpu_push16(gbc, cpu->pc); cpu->pc = 0x10; cycles = 16; break;
         case 0xD8: if (CPU_F(cpu) & GBC_FLAG_C) { cpu->pc = cpu_pop16(gbc); cycles = 20; } else cycles = 8; break;
-        case 0xD9: cpu->pc = cpu_pop16(gbc); cpu->ime = 1; cycles = 16; break;
+        case 0xD9: cpu->pc = cpu_pop16(gbc); cpu->ime = 1; cpu->ime_delay = 0; cycles = 16; break;
         case 0xDA: { uint16_t a = cpu_read16(gbc); if (CPU_F(cpu) & GBC_FLAG_C) { cpu->pc = a; cycles = 16; } else cycles = 12; break; }
         case 0xDC: { uint16_t a = cpu_read16(gbc); if (CPU_F(cpu) & GBC_FLAG_C) { cpu_push16(gbc, cpu->pc); cpu->pc = a; cycles = 24; } else cycles = 12; break; }
         case 0xDE: cpu_sub(gbc, cpu_read8(gbc), (CPU_F(cpu) & GBC_FLAG_C) ? 1 : 0); cycles = 8; break;
@@ -476,10 +483,13 @@ uint8_t gbc_cpu_step(gbc_t *gbc)
         }
     }
 
-    if (delayed_ime) {
-        cpu->ime = 1;
-    }
     cpu->cycles += cycles;
+    /* EI takes effect after one subsequent instruction; DI cancels it.
+     * https://gbdev.io/pandocs/Interrupts.html */
+    if (delayed_ime && op != 0xF3) {
+        cpu->ime = 1;
+        cpu->ime_delay = 0;
+    }
     CPU_F(cpu) &= 0xF0;
     return cycles;
 }

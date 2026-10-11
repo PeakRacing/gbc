@@ -53,12 +53,20 @@
 #define GBC_USE_FS                  (1)
 #endif
 
+#ifndef GBC_USE_SRAM
+#define GBC_USE_SRAM                (1)
+#endif
+
 #ifndef GBC_ENABLE_SRAM_SAVE
 #define GBC_ENABLE_SRAM_SAVE        (GBC_USE_FS)
 #endif
 
 #ifndef GBC_FRAME_SKIP
 #define GBC_FRAME_SKIP              (0)
+#endif
+
+#ifndef GBC_FRAMEBUFFER_ENABLE
+#define GBC_FRAMEBUFFER_ENABLE      (1)
 #endif
 
 #ifndef GBC_RAM_LACK
@@ -97,8 +105,24 @@
 #define GBC_SAVE_PATH_MAX           (260)
 #endif
 
+#if (GBC_ENABLE_CGB == 1)
+#define GBC_VRAM_BANKS               (2)
+#define GBC_WRAM_BANKS               (8)
+#else
+#define GBC_VRAM_BANKS               (1)
+#define GBC_WRAM_BANKS               (2)
+#endif
+
+#if (GBC_ROM_STREAM == 1) && (GBC_USE_FS == 0)
+#error "GBC_ROM_STREAM requires GBC_USE_FS"
+#endif
+#if (GBC_ROM_CACHE_BANKS < 1)
+#error "GBC_ROM_CACHE_BANKS must be positive"
+#endif
+
 #define GBC_WIDTH                   (160)
 #define GBC_HEIGHT                  (144)
+#define GBC_OAM_ENTRIES             (40)
 #define GBC_CPU_CLOCK_FREQ          (4194304UL)
 #define GBC_CPU_CLOCK_FREQ_CGB      (8388608UL)
 #define GBC_CYCLES_PER_LINE         (456)

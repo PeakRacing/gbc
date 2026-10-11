@@ -18,8 +18,8 @@
 #define GBC_IF_JOYPAD               (0x10)
 
 typedef struct {
-    uint8_t vram[2][0x2000];
-    uint8_t wram[8][0x1000];
+    uint8_t vram[GBC_VRAM_BANKS][0x2000];
+    uint8_t wram[GBC_WRAM_BANKS][0x1000];
     uint8_t oam[0xA0];
     uint8_t io[0x80];
     uint8_t hram[0x7F];
@@ -32,6 +32,9 @@ typedef struct {
     uint16_t hdma_dst;
     uint8_t hdma_blocks;
     uint8_t hdma_active;
+    /* General purpose HDMA stalls the CPU for 32 dots per block
+     * transferred.  This counts down the stall for the block in flight. */
+    uint8_t hdma_busy_cycles;
     uint16_t oam_dma_cycles;
     uint16_t serial_cycles;
 } gbc_mmu_t;
@@ -43,6 +46,7 @@ uint8_t gbc_mmu_read(struct gbc *gbc, uint16_t addr);
 void gbc_mmu_write(struct gbc *gbc, uint16_t addr, uint8_t data);
 void gbc_mmu_request_interrupt(struct gbc *gbc, uint8_t mask);
 void gbc_mmu_hdma_hblank(struct gbc *gbc);
+uint8_t gbc_mmu_cpu_stalled(struct gbc *gbc);
 void gbc_mmu_step_dma(struct gbc *gbc, uint16_t cycles);
 void gbc_mmu_step_serial(struct gbc *gbc, uint16_t cycles);
 

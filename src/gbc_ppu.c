@@ -35,7 +35,7 @@ GBC_INLINE gbc_color_t gbc_ppu_dmg_color(uint8_t palette, uint8_t index)
     return gbc_ppu_color(dmg_shades[shade][0], dmg_shades[shade][1], dmg_shades[shade][2]);
 }
 
-GBC_INLINE gbc_color_t gbc_ppu_cgb_color(uint8_t *palette, uint8_t palette_id, uint8_t index)
+GBC_INLINE gbc_color_t gbc_ppu_cgb_color(const uint8_t *palette, uint8_t palette_id, uint8_t index)
 {
     uint8_t base = (uint8_t)((palette_id * 8) + (index * 2));
     uint16_t raw = (uint16_t)(palette[base] | (palette[base + 1] << 8));
@@ -113,14 +113,22 @@ static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
     gbc_mmu_t *mmu = &gbc->mmu;
     gbc_ppu_t *ppu = &gbc->ppu;
     uint8_t *vram0 = mmu->vram[0];
+#if (GBC_ENABLE_CGB == 1)
     uint8_t *vram1 = mmu->vram[1];
+#else
+    uint8_t *vram1 = mmu->vram[0];
+#endif
     gbc_model_t model = gbc->model;
     uint8_t lcdc = mmu->io[0x40];
     uint8_t scy = mmu->io[0x42];
     uint8_t scx = mmu->io[0x43];
     uint8_t wy = mmu->io[0x4A];
     uint8_t wx = mmu->io[0x4B];
-    uint8_t use_window = (uint8_t)((lcdc & 0x20) && ly >= wy && wx <= 166);
+    /* WX is the window's left edge plus seven.  Values of 167 and above place
+     * the edge past the visible area, which the hardware treats as "no
+     * window" instead of clamping it to the right edge.  The comparison runs
+     * in wider arithmetic so the boundary stays explicit. */
+    uint8_t use_window = (uint8_t)((lcdc & 0x20) && ly >= wy && (uint16_t)wx <= 166U);
     uint16_t bg_map = (lcdc & 0x08) ? 0x1C00 : 0x1800;
     uint16_t win_map = (lcdc & 0x40) ? 0x1C00 : 0x1800;
     uint8_t signed_tiles = ((lcdc & 0x10) == 0);
@@ -200,7 +208,7 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
         return;
     }
 
-    for (uint8_t i = 0; i < 40 && sprite_count < 10; i++) {
+    for (uint8_t i = 0; i < GBC_OAM_ENTRIES && sprite_count < 10; i++) {
         uint8_t *oam = &oam_data[i * 4];
         int16_t sy = (int16_t)oam[0] - 16;
 
@@ -209,12 +217,14 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
         }
     }
 
+    /* Select in OAM order. DMG draws lower X first, CGB draws lower OAM
+     * index first. https://gbdev.io/pandocs/OAM.html#drawing-priority */
     if (model == GBC_MODEL_DMG) {
         for (uint8_t i = 1; i < sprite_count; i++) {
             uint8_t sprite = sprites[i];
-            uint8_t x = oam_data[(sprite * 4) + 1];
+            uint8_t x = oam_data[sprite * 4 + 1];
             uint8_t j = i;
-            while (j > 0 && oam_data[(sprites[j - 1] * 4) + 1] > x) {
+            while (j > 0 && oam_data[sprites[j - 1] * 4 + 1] > x) {
                 sprites[j] = sprites[j - 1];
                 j--;
             }
@@ -327,7 +337,11 @@ void gbc_ppu_render_scanline(gbc_t *gbc, uint8_t ly)
         gbc_ppu_render_sprites(gbc, ly);
     }
 
-#if (GBC_RAM_LACK == 1)
+#if (GBC_FRAMEBUFFER_ENABLE == 0)
+    if (gbc_ppu_should_draw(gbc)) {
+        gbc_draw(0, ly, GBC_WIDTH - 1, ly, gbc->ppu.line);
+    }
+#elif (GBC_RAM_LACK == 1)
     gbc_memcpy(&gbc->gbc_draw_data[(ly % (GBC_HEIGHT / 2)) * GBC_WIDTH], gbc->ppu.line, sizeof(gbc->ppu.line));
     if (gbc_ppu_should_draw(gbc) && (ly == (GBC_HEIGHT / 2 - 1) || ly == (GBC_HEIGHT - 1))) {
         uint8_t y1 = (ly < GBC_HEIGHT / 2) ? 0 : (GBC_HEIGHT / 2);
@@ -363,7 +377,7 @@ void gbc_ppu_step(gbc_t *gbc, uint8_t cycles)
         if (ly == 144) {
             gbc_mmu_request_interrupt(gbc, GBC_IF_VBLANK);
             gbc_ppu_set_mode(gbc, 1);
-#if (GBC_RAM_LACK == 0)
+#if (GBC_FRAMEBUFFER_ENABLE == 1) && (GBC_RAM_LACK == 0)
             if (gbc_ppu_should_draw(gbc)) {
                 gbc_draw(0, 0, GBC_WIDTH - 1, GBC_HEIGHT - 1, gbc->gbc_draw_data);
             }
