@@ -20,6 +20,7 @@ inc/                Public API and core module headers
 src/                Platform-independent emulator core
 port/               Default configuration and weak platform functions
 sdl/sdl2/           SDL2 desktop verification port and xmake build
+tests/              Module regression suites, headless ROM smoke harness and their port configs
 AGENTS.md           Chinese contributor/agent guidelines
 README_zh.md        Chinese README
 ```
@@ -35,7 +36,25 @@ xmake run gbc path\to\game.gbc
 # Regression tests
 xmake build core_test && xmake run core_test
 xmake build sound_test && xmake run sound_test
+
+# Headless smoke test against a real cartridge image
+xmake build rom_test && xmake run rom_test path\to\game.gb 600
+xmake build rom_test_stream && xmake run rom_test_stream path\to\game.gb 600
 ```
+
+`xmake run rom_test <rom file> [frames] [audio file] [cycle budget]` boots a real
+cartridge headlessly, emulates the requested number of frames (default 60) and
+prints the header it parsed, the final CPU register state, a framebuffer
+fingerprint and the number of APU bytes produced. It exits non-zero when the
+image cannot be loaded or the cartridge controller is unsupported, which makes
+it usable as a batch check over a ROM library. The optional cycle budget
+(default two million cycles per frame) guards against cartridges that switch the
+LCD off: those never produce a frame, so without the budget the harness would
+spin forever instead of reporting the stall. `rom_test_stream` builds the same harness with
+`GBC_ROM_STREAM=1`, so running both over one image compares the full-ROM and the
+LRU bank-cached paths at the final frame (identical hashes and register state mean
+the cached path reproduces the resident one). The harness never writes battery
+saves, so it is safe to point at a read-only ROM directory.
 
 `sdl/sdl2/xmake.lua` fetches `libsdl2` automatically and compiles `src/**.c`, `sdl/sdl2/main.c`, and the SDL port.
 
@@ -112,5 +131,24 @@ This is an MCU-focused MVP, not a cycle-accurate emulator:
 - SM83 CPU covers all common opcode paths; a few edge-case timing behaviors may not be exact.
 - PPU uses scanline rendering; Mode 3 length is approximated by `SCX&7` + visible sprite count × 6. Pixel FIFO border behavior is not fully accurate.
 - APU is off by default; when enabled, four-channel approximate stereo (square, wave, noise) is provided using integer/fixed-point arithmetic only.
-- MBC3 RTC, HBlank HDMA, basic OAM DMA blocking, and basic internal-clock serial transfer are implemented; infrared and link-cable serial are not.
+- MBC3 RTC, HBlank and general-purpose HDMA, basic OAM DMA blocking, and basic internal-clock serial transfer are implemented; infrared and link-cable serial are not. A general-purpose HDMA transfer holds the CPU off the bus while it runs, one block per 32 CPU T-cycles (64 in double-speed mode).
 - Supported MBC types: ROM ONLY, MBC1, MBC2, MBC3, MBC5. Other types return an unsupported error.
+
+### Low-memory MCU integration
+
+Use `gbc_init_static()` / `gbc_deinit_static()` with caller-owned `gbc_t` storage.
+Existing `gbc_load_rom()` already borrows the ROM buffer without copying: retain
+that buffer until unload (Flash/XIP is suitable). Do not pass static storage to
+`gbc_deinit()`, which frees its context.
+
+`GBC_FRAMEBUFFER_ENABLE=0` draws each scanline from `ppu.line`, removing the full
+or half framebuffer. The draw hook must consume/copy pixels synchronously.
+`GBC_ENABLE_CGB=0` reduces WRAM/VRAM to 8 KiB each. `GBC_USE_SRAM=0` skips cartridge
+RAM allocation and disables RAM/RTC register access; games needing those features
+may fail. Use `GBC_ENABLE_SRAM_SAVE=0` to disable disk persistence alone.
+Bundled PC/MCU configurations now allow compiler `-D` overrides.
+
+Run `xmake build low_memory_test && xmake run low_memory_test` in `sdl/sdl2` to
+verify RGB565, scanline output, DMG bank bounds, borrowed ROM lifetime and zero
+context/cartridge/hot-path allocations with filesystem, audio and SRAM disabled.
+This host test does not establish MCU frame rate or stack requirements.
