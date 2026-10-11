@@ -16,10 +16,10 @@ set_languages("c11")
 add_cflags("/utf-8", {tools = "cl"})
 
 add_requires("libsdl2", {configs = {sdlmain = false}})
-add_packages("libsdl2")
 
 target("gbc", function ()
     set_kind("binary")
+    add_packages("libsdl2")
 
     local gbc_dir = "../.."
     add_includedirs(gbc_dir .. "/inc")
@@ -40,6 +40,26 @@ target("core_test", function ()
     add_files(gbc_dir .. "/tests/regression_test.c")
 end)
 
+target("rom_test", function ()
+    set_kind("binary")
+
+    local gbc_dir = "../.."
+    add_includedirs(gbc_dir .. "/tests/rom_port")
+    add_includedirs(gbc_dir .. "/inc")
+    add_files(gbc_dir .. "/src/**.c")
+    add_files(gbc_dir .. "/tests/rom_smoke_test.c")
+end)
+
+target("rom_test_stream", function ()
+    set_kind("binary")
+
+    local gbc_dir = "../.."
+    add_includedirs(gbc_dir .. "/tests/rom_stream_port")
+    add_includedirs(gbc_dir .. "/inc")
+    add_files(gbc_dir .. "/src/**.c")
+    add_files(gbc_dir .. "/tests/rom_smoke_test.c")
+end)
+
 target("sound_test", function ()
     set_kind("binary")
 
@@ -50,3 +70,12 @@ target("sound_test", function ()
     add_files(gbc_dir .. "/tests/apu_regression_test.c")
 end)
 
+
+target("low_memory_test", function ()
+    set_kind("binary")
+    local gbc_dir = "../.."
+    add_includedirs(gbc_dir .. "/tests/low_memory_port")
+    add_includedirs(gbc_dir .. "/inc")
+    add_files(gbc_dir .. "/src/**.c")
+    add_files(gbc_dir .. "/tests/low_memory_test.c")
+end)
