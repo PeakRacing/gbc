@@ -204,7 +204,7 @@ static void gbc_cart_rtc_add_seconds(gbc_cart_t *cart, uint32_t seconds)
     gbc_cart_rtc_store_days(cart, (uint16_t)(total & 0x1FF), carry);
 }
 
-static void gbc_cart_rtc_sync(gbc_t *gbc)
+void gbc_cart_rtc_sync(gbc_t *gbc)
 {
     gbc_cart_t *cart = &gbc->cart;
     uint32_t now;

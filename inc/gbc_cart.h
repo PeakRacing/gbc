@@ -104,6 +104,7 @@ int gbc_cart_load_file(struct gbc *gbc, const char *file_path);
 #endif
 void gbc_cart_unload(struct gbc *gbc);
 void gbc_cart_reset(struct gbc *gbc);
+void gbc_cart_rtc_sync(struct gbc *gbc);
 uint8_t gbc_cart_read_rom(struct gbc *gbc, uint16_t addr);
 uint8_t gbc_cart_read_ram(struct gbc *gbc, uint16_t addr);
 void gbc_cart_write(struct gbc *gbc, uint16_t addr, uint8_t data);

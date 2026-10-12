@@ -24,3 +24,19 @@ Regression command: `xmake run feature_test` in `sdl/sdl2`. This exercises MBC1,
 MBC2, explicit borrowed-ROM paths, short reads, short writes, sync/close/replace
 failure, retained cartridges and unchanged old save data. Existing `core_test`
 also checks file-backed round trips. No copyrighted ROM images are included.
+
+## RTC
+
+`GBC_ENABLE_RTC_SAVE` defaults to `GBC_ENABLE_SRAM_SAVE` and can be disabled
+independently. MBC3 timer cartridges use a separate 32-byte `.rtc` sidecar:
+`GRTC` magic, version 1, live/latched registers, latch edge state, millisecond
+remainder and CRC32, all integers encoded little-endian. No process timestamp
+or wall-clock timestamp is stored. Restore establishes a fresh tick baseline,
+so time while the emulator was closed never advances the cartridge clock.
+Running time, halt, day carry and latched values are retained.
+
+Each `.sav` and `.rtc` is committed independently; their pair is not an atomic
+transaction. Either failure is reported. A bad RTC file resets RTC data and
+blocks saving until explicitly detached or successfully reloaded. Regression
+tests cover day rollover, halt/carry, subsecond remainder, latched values,
+elapsed offline time, failed replacement and corrupted sidecars.

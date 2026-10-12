@@ -221,9 +221,65 @@ static void feature_battery(void)
     remove("feature_test.sav");
 }
 
+
+static void feature_rtc(void)
+{
+    remove("feature_test.rtc");
+    feature_setup(0x10);
+    test_ticks = 100;
+    feature_gbc.cart.rtc_last_ticks = test_ticks;
+    feature_gbc.cart.rtc_regs[0] = 59;
+    feature_gbc.cart.rtc_regs[1] = 59;
+    feature_gbc.cart.rtc_regs[2] = 23;
+    feature_gbc.cart.rtc_regs[3] = 0xFF;
+    feature_gbc.cart.rtc_regs[4] = 1;
+    test_ticks += 1500;
+    CHECK(gbc_persist_save(&feature_gbc) == GBC_OK);
+    CHECK(feature_gbc.cart.rtc_regs[0] == 0);
+    CHECK(feature_gbc.cart.rtc_regs[3] == 0);
+    CHECK(feature_gbc.cart.rtc_regs[4] == 0x80);
+    CHECK(feature_gbc.cart.rtc_ms == 500);
+    CHECK(gbc_unload_rom_discard(&feature_gbc) == GBC_OK);
+    test_ticks += 1000000;
+    feature_setup(0x10);
+    CHECK(gbc_persist_load(&feature_gbc) == GBC_OK);
+    CHECK(feature_gbc.cart.rtc_regs[0] == 0);
+    CHECK(feature_gbc.cart.rtc_ms == 500);
+    test_ticks += 500;
+    gbc_cart_rtc_sync(&feature_gbc);
+    CHECK(feature_gbc.cart.rtc_regs[0] == 1);
+    feature_gbc.cart.rtc_regs[4] = 0xC0;
+    feature_gbc.cart.rtc_latched[0] = 42;
+    feature_gbc.cart.rtc_latch_prev = 1;
+    CHECK(gbc_persist_save(&feature_gbc) == GBC_OK);
+    gbc_unload_rom_discard(&feature_gbc);
+    test_ticks += 5000;
+    feature_setup(0x10);
+    CHECK(gbc_persist_load(&feature_gbc) == GBC_OK);
+    CHECK(feature_gbc.cart.rtc_latched[0] == 42);
+    CHECK(feature_gbc.cart.rtc_latch_prev == 1);
+    test_ticks += 5000;
+    gbc_cart_rtc_sync(&feature_gbc);
+    CHECK(feature_gbc.cart.rtc_regs[0] == 1);
+    CHECK(feature_gbc.cart.rtc_regs[4] == 0xC0);
+    feature_fault_replace = 1;
+    CHECK(gbc_persist_save(&feature_gbc) == GBC_ERROR_IO);
+    feature_fault_replace = 0;
+    FILE *fp = fopen("feature_test.rtc", "r+b");
+    CHECK(fp != NULL);
+    if (fp) { fputc('X', fp); fclose(fp); }
+    CHECK(gbc_persist_load(&feature_gbc) == GBC_ERROR_FORMAT);
+    CHECK(feature_gbc.cart.rtc_regs[0] == 0);
+    CHECK(gbc_persist_save(&feature_gbc) == GBC_ERROR_FORMAT);
+    gbc_unload_rom_discard(&feature_gbc);
+    remove("feature_test.rtc");
+    remove("feature_test.sav");
+}
+
 int main(void)
 {
     feature_battery();
+    feature_rtc();
     printf("feature regression tests: %s\n", test_failures ? "FAILED" : "passed");
     return test_failures ? 1 : 0;
 }

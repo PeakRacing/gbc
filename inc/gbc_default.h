@@ -62,7 +62,7 @@
 #endif
 
 #ifndef GBC_ENABLE_RTC_SAVE
-#define GBC_ENABLE_RTC_SAVE         (0)
+#define GBC_ENABLE_RTC_SAVE         (GBC_ENABLE_SRAM_SAVE)
 #endif
 #ifndef GBC_ENABLE_SAVE_STATE
 #define GBC_ENABLE_SAVE_STATE       (0)
