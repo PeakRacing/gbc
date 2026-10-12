@@ -84,7 +84,9 @@ typedef struct {
     uint8_t rtc_started;
     uint16_t rtc_ms;
     uint32_t rtc_last_ticks;
-#if (GBC_ENABLE_SRAM_SAVE == 1)
+#if (GBC_PERSIST_ENABLE)
+    uint8_t ram_dirty;
+    uint8_t persist_blocked;
     char save_path[GBC_SAVE_PATH_MAX];
 #endif
 #if (GBC_ROM_STREAM == 1)

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 
 #include "gbc.h"
+#include "../../../port/gbc_fs_impl.h"
 
 static SDL_Window *sdl_window;
 static SDL_Renderer *sdl_renderer;

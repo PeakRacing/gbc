@@ -12,6 +12,7 @@
 #include <time.h>
 
 #include "gbc.h"
+#include "gbc_fs_impl.h"
 
 GBC_WEAK void *gbc_malloc(int num)
 {

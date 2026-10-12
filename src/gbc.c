@@ -58,7 +58,10 @@ int gbc_deinit_static(gbc_t *gbc)
     if (gbc == NULL) {
         return GBC_ERROR;
     }
-    gbc_cart_unload(gbc);
+    int ret = gbc_unload_rom(gbc);
+    if (ret != GBC_OK) {
+        return ret;
+    }
     return gbc_deinitex(gbc);
 }
 
@@ -69,6 +72,9 @@ int gbc_deinit(gbc_t *gbc)
         return GBC_ERROR;
     }
     ret = gbc_deinit_static(gbc);
+    if (ret != GBC_OK) {
+        return ret;
+    }
     gbc_free(gbc);
     return ret;
 }
@@ -94,6 +100,20 @@ int gbc_unload_rom(gbc_t *gbc)
     if (gbc == NULL) {
         return GBC_ERROR;
     }
+#if (GBC_PERSIST_ENABLE)
+    int ret = gbc_persist_save(gbc);
+    if (ret != GBC_OK) {
+        return ret;
+    }
+#endif
+    return gbc_unload_rom_discard(gbc);
+}
+
+int gbc_unload_rom_discard(gbc_t *gbc)
+{
+    if (gbc == NULL) {
+        return GBC_ERROR;
+    }
     gbc_cart_unload(gbc);
     return GBC_OK;
 }
@@ -112,6 +132,17 @@ int gbc_load_file(gbc_t *gbc, const char *file_path)
         return ret;
     }
     gbc_reset(gbc);
+#if (GBC_PERSIST_ENABLE)
+    ret = gbc_persist_set_path(gbc, file_path);
+    if (ret == GBC_OK) {
+        ret = gbc_persist_load(gbc);
+    }
+    if (ret != GBC_OK) {
+        gbc->cart.persist_blocked = 1;
+        GBC_LOG_WARN("persistence load failed: %d; cartridge retained, saves blocked\n", ret);
+        return ret;
+    }
+#endif
     return GBC_OK;
 }
 

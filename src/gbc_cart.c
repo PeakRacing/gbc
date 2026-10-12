@@ -295,86 +295,6 @@ static void gbc_cart_rtc_latch(gbc_t *gbc, uint8_t data)
     cart->rtc_latch_prev = data & 0x01;
 }
 
-#if (GBC_ENABLE_SRAM_SAVE == 1) && (GBC_USE_SRAM == 1)
-static uint8_t *gbc_cart_battery_ram_ptr(gbc_cart_t *cart)
-{
-    return (cart->header.mbc == GBC_MBC2) ? cart->mbc2_ram : cart->ram_data;
-}
-
-static uint32_t gbc_cart_battery_ram_size(gbc_cart_t *cart)
-{
-    return (cart->header.mbc == GBC_MBC2) ? (uint32_t)sizeof(cart->mbc2_ram) : cart->ram_size;
-}
-
-static void gbc_cart_set_save_path(gbc_cart_t *cart, const char *file_path)
-{
-    int ret;
-
-    cart->save_path[0] = '\0';
-    if (file_path == NULL) {
-        return;
-    }
-    ret = snprintf(cart->save_path, sizeof(cart->save_path), "%s.sav", file_path);
-    if (ret < 0 || (size_t)ret >= sizeof(cart->save_path)) {
-        cart->save_path[0] = '\0';
-        GBC_LOG_WARN("save path is too long, battery RAM disabled\n");
-    }
-}
-
-static void gbc_cart_load_battery_ram(gbc_t *gbc)
-{
-    gbc_cart_t *cart = &gbc->cart;
-    FILE *fp;
-    uint8_t *ram;
-    uint32_t ram_size;
-    size_t got;
-
-    ram = gbc_cart_battery_ram_ptr(cart);
-    ram_size = gbc_cart_battery_ram_size(cart);
-    if (!cart->header.has_battery || ram == NULL || ram_size == 0 || cart->save_path[0] == '\0') {
-        return;
-    }
-
-    fp = gbc_fopen(cart->save_path, "rb");
-    if (fp == NULL) {
-        return;
-    }
-    got = gbc_fread(ram, 1, ram_size, fp);
-    if (got != ram_size) {
-        GBC_LOG_WARN("short battery RAM read: %u/%u bytes\n", (unsigned)got, (unsigned)ram_size);
-    }
-    gbc_fclose(fp);
-}
-
-static void gbc_cart_save_battery_ram(gbc_t *gbc)
-{
-    gbc_cart_t *cart = &gbc->cart;
-    FILE *fp;
-    uint8_t *ram;
-    uint32_t ram_size;
-    size_t wrote;
-
-    ram = gbc_cart_battery_ram_ptr(cart);
-    ram_size = gbc_cart_battery_ram_size(cart);
-    if (!cart->header.has_battery || ram == NULL || ram_size == 0 || cart->save_path[0] == '\0') {
-        return;
-    }
-
-    fp = gbc_fopen(cart->save_path, "wb");
-    if (fp == NULL) {
-        GBC_LOG_WARN("failed to open battery RAM save file\n");
-        return;
-    }
-    wrote = gbc_fwrite(ram, 1, ram_size, fp);
-    if (wrote != ram_size) {
-        GBC_LOG_WARN("short battery RAM write: %u/%u bytes\n", (unsigned)wrote, (unsigned)ram_size);
-    }
-    if (gbc_fclose(fp) != 0) {
-        GBC_LOG_WARN("failed to close battery RAM save file\n");
-    }
-}
-#endif /* GBC_ENABLE_SRAM_SAVE */
-
 int gbc_cart_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size, uint8_t take_ownership)
 {
     gbc_cart_t *cart;
@@ -385,7 +305,10 @@ int gbc_cart_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size, uint8_t tak
     }
 
     cart = &gbc->cart;
-    gbc_cart_unload(gbc);
+    ret = gbc_unload_rom(gbc);
+    if (ret != GBC_OK) {
+        return ret;
+    }
     ret = gbc_cart_parse_header(&cart->header, rom, size);
     if (ret != GBC_OK) {
         return ret;
@@ -498,10 +421,7 @@ int gbc_cart_load_file(gbc_t *gbc, const char *file_path)
     }
     gbc->cart.stream = fp;
     gbc_memset(gbc->cart.cache, 0, sizeof(gbc->cart.cache));
-#if (GBC_ENABLE_SRAM_SAVE == 1) && (GBC_USE_SRAM == 1)
-    gbc_cart_set_save_path(&gbc->cart, file_path);
-    gbc_cart_load_battery_ram(gbc);
-#endif
+
     return GBC_OK;
 #else
     rom = (uint8_t *)gbc_malloc((int)size);
@@ -518,11 +438,6 @@ int gbc_cart_load_file(gbc_t *gbc, const char *file_path)
     int ret = gbc_cart_load_rom(gbc, rom, (uint32_t)size, 1);
     if (ret != GBC_OK) {
         gbc_free(rom);
-    } else {
-#if (GBC_ENABLE_SRAM_SAVE == 1) && (GBC_USE_SRAM == 1)
-        gbc_cart_set_save_path(&gbc->cart, file_path);
-        gbc_cart_load_battery_ram(gbc);
-#endif
     }
     return ret;
 #endif
@@ -537,9 +452,7 @@ void gbc_cart_unload(gbc_t *gbc)
         return;
     }
     cart = &gbc->cart;
-#if (GBC_ENABLE_SRAM_SAVE == 1) && (GBC_USE_SRAM == 1)
-    gbc_cart_save_battery_ram(gbc);
-#endif
+
 #if (GBC_ROM_STREAM == 1)
     if (cart->stream != NULL) {
         gbc_fclose(cart->stream);
@@ -685,7 +598,13 @@ void gbc_cart_write_ram(gbc_t *gbc, uint16_t addr, uint8_t data)
         return;
     }
     if (cart->header.mbc == GBC_MBC2) {
-        cart->mbc2_ram[addr & 0x01FF] = data & 0x0F;
+        uint16_t index = addr & 0x01FF;
+        if (cart->mbc2_ram[index] != (data & 0x0F)) {
+#if (GBC_PERSIST_ENABLE)
+            cart->ram_dirty = 1;
+#endif
+            cart->mbc2_ram[index] = data & 0x0F;
+        }
         return;
     }
     if (cart->header.mbc == GBC_MBC3 && gbc_cart_rtc_index(cart->rtc_select) != 0xFF) {
@@ -696,7 +615,10 @@ void gbc_cart_write_ram(gbc_t *gbc, uint16_t addr, uint8_t data)
         return;
     }
     offset = ((uint32_t)cart->ram_bank * GBC_RAM_BANK_SIZE) + (addr & 0x1FFF);
-    if (offset < cart->ram_size) {
+    if (offset < cart->ram_size && cart->ram_data[offset] != data) {
+#if (GBC_PERSIST_ENABLE)
+        cart->ram_dirty = 1;
+#endif
         cart->ram_data[offset] = data;
     }
 #endif

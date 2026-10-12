@@ -64,6 +64,14 @@ int gbc_unload_file(gbc_t *gbc);
 /* Borrow ROM storage without copying; keep it valid until unload. */
 int gbc_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size);
 int gbc_unload_rom(gbc_t *gbc);
+/* Explicitly discard unsaved cartridge changes, retaining the context. */
+int gbc_unload_rom_discard(gbc_t *gbc);
+#if (GBC_PERSIST_ENABLE)
+/* Base path excludes .sav/.rtc. NULL detaches persistence. */
+int gbc_persist_set_path(gbc_t *gbc, const char *base_path);
+int gbc_persist_load(gbc_t *gbc);
+int gbc_persist_save(gbc_t *gbc);
+#endif
 int gbc_initex(gbc_t *gbc);
 int gbc_deinitex(gbc_t *gbc);
 void gbc_frame(gbc_t *gbc);

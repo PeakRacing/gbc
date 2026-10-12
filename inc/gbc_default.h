@@ -61,6 +61,18 @@
 #define GBC_ENABLE_SRAM_SAVE        (GBC_USE_FS)
 #endif
 
+#ifndef GBC_ENABLE_RTC_SAVE
+#define GBC_ENABLE_RTC_SAVE         (0)
+#endif
+#ifndef GBC_ENABLE_SAVE_STATE
+#define GBC_ENABLE_SAVE_STATE       (0)
+#endif
+#ifndef GBC_ENABLE_BOOT_ROM
+#define GBC_ENABLE_BOOT_ROM         (0)
+#endif
+#define GBC_PERSIST_ENABLE ((GBC_USE_FS == 1) && (GBC_USE_SRAM == 1) && ((GBC_ENABLE_SRAM_SAVE == 1) || (GBC_ENABLE_RTC_SAVE == 1)))
+#define GBC_STORAGE_ENABLE ((GBC_USE_FS == 1) && ((GBC_PERSIST_ENABLE) || (GBC_ENABLE_SAVE_STATE == 1)))
+
 #ifndef GBC_FRAME_SKIP
 #define GBC_FRAME_SKIP              (0)
 #endif
@@ -150,6 +162,9 @@ typedef enum {
     GBC_ERROR_BAD_ROM = -3,
     GBC_ERROR_UNSUPPORTED = -4,
     GBC_ERROR_IO = -5,
+    GBC_ERROR_FORMAT = -6,
+    GBC_ERROR_MISMATCH = -7,
+    GBC_ERROR_PATH = -8,
 } gbc_error_t;
 
 typedef enum {
@@ -178,6 +193,13 @@ size_t gbc_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
 int gbc_fseek(FILE *stream, long int offset, int whence);
 long gbc_ftell(FILE *stream);
 int gbc_fclose(FILE *stream);
+#if (GBC_STORAGE_ENABLE)
+int gbc_file_sync(FILE *stream);
+int gbc_file_replace(const char *temporary, const char *destination);
+int gbc_file_remove(const char *path);
+/* 1: exists, 0: missing, -1: inaccessible. */
+int gbc_file_exists(const char *path);
+#endif
 #endif
 
 int gbc_draw(int x1, int y1, int x2, int y2, gbc_color_t *color_data);
