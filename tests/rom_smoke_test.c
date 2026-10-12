@@ -423,6 +423,9 @@ int main(int argc, char **argv)
         }
         cycles_run += gbc_step(gbc);
     }
+    /* The snapshot excludes the derived framebuffer. Capture the requested
+     * run's hash before the replay produces later frames. */
+    framebuffer_hash = smoke_hash32((const uint8_t *)gbc->gbc_draw_data, sizeof(gbc->gbc_draw_data));
 #if defined(GBC_SMOKE_STATE_REPLAY)
     if (smoke_state_replay(gbc) != GBC_OK) {
         printf("FAIL state replay\n");
@@ -433,7 +436,6 @@ int main(int argc, char **argv)
     smoke_request_quit(gbc);
 
     frames_run = gbc->frame_count - start_frame;
-    framebuffer_hash = smoke_hash32((const uint8_t *)gbc->gbc_draw_data, sizeof(gbc->gbc_draw_data));
 #if (GBC_ENABLE_SOUND == 1)
     if (smoke_audio_seen) {
         audio_hash = smoke_audio_bytes; /* stream length is the stable signal */

@@ -6,6 +6,7 @@
 #include "gbc_storage.h"
 
 #if (GBC_PERSIST_ENABLE)
+#if (GBC_ENABLE_SRAM_SAVE == 1)
 static uint8_t *gbc_persist_ram(gbc_t *gbc, uint32_t *size)
 {
     if (gbc->cart.header.mbc == GBC_MBC2) {
@@ -15,6 +16,7 @@ static uint8_t *gbc_persist_ram(gbc_t *gbc, uint32_t *size)
     *size = gbc->cart.ram_size;
     return gbc->cart.ram_data;
 }
+#endif
 
 int gbc_persist_set_path(gbc_t *gbc, const char *base_path)
 {
@@ -74,6 +76,9 @@ static int gbc_persist_load_ram(gbc_t *gbc)
                 }
                 if (gbc_fclose(fp) != 0) {
                     ret = GBC_ERROR_IO;
+                }
+                if (ret == GBC_OK && gbc->cart.header.mbc == GBC_MBC2) {
+                    for (uint32_t i = 0; i < size; i++) { ram[i] &= 0x0F; }
                 }
             }
         }

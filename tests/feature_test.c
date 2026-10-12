@@ -240,9 +240,14 @@ static void feature_battery(void)
     feature_setup(0x06);
     gbc_cart_write_ram(&feature_gbc, 0xA055, 0xFD);
     CHECK(gbc_persist_save(&feature_gbc) == GBC_OK);
+    /* Legacy writers may retain the unused upper nibble. */
+    fp = fopen("feature_test.sav", "r+b");
+    CHECK(fp != NULL);
+    if (fp) { fseek(fp, 0x55, SEEK_SET); fputc(0xFD, fp); fclose(fp); }
     feature_setup(0x06);
     CHECK(gbc_persist_load(&feature_gbc) == GBC_OK);
     CHECK(gbc_cart_read_ram(&feature_gbc, 0xA055) == 0xFD);
+    CHECK(feature_gbc.cart.mbc2_ram[0x55] == 0x0D);
     CHECK(gbc_deinit_static(&feature_gbc) == GBC_OK);
     remove("feature_test.sav");
 }
