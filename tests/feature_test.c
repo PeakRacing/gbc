@@ -117,8 +117,12 @@ void gbc_delay(uint32_t ms)
 
 int gbc_initex(gbc_t *gbc)
 {
+#if defined(GBC_FEATURE_FAST_RUN) && GBC_FEATURE_FAST_RUN
+    return gbc_set_run_mode(gbc, GBC_RUN_FAST);
+#else
     (void)gbc;
     return GBC_OK;
+#endif
 }
 
 int gbc_deinitex(gbc_t *gbc)

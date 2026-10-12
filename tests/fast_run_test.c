@@ -161,6 +161,49 @@ static void test_audio_events(void)
     gbc_deinit_static(&gbc);
 }
 
+static void test_dma_stat_and_palette(void)
+{
+    gbc_t gbc;
+    fast_setup(&gbc, 1);
+    gbc.mmu.io[0x41] = 0xE0; gbc.mmu.io[0x45] = 1;
+    gbc.mmu.io[0x0F] = 0;
+    gbc_ppu_fast_step(&gbc, 4);
+    expect_u8("Mode2 STAT IRQ", gbc.mmu.io[0x0F] & GBC_IF_LCD, GBC_IF_LCD);
+    gbc_ppu_fast_step(&gbc, 76);
+    expect_u8("STAT polling mode3", gbc_mmu_read(&gbc, 0xFF41) & 3, 3);
+    gbc_mmu_write(&gbc, 0xFF68, 0x80);
+    gbc_mmu_write(&gbc, 0xFF69, 0x1F); gbc_mmu_write(&gbc, 0xFF69, 0);
+    expect_int("palette split/autoincrement", gbc.fast->live_bg[0], gbc_ppu_color(31, 0, 0));
+    expect_u8("palette index", gbc.ppu.bgpi, 0x82);
+    for (unsigned i = 0; i < 16; i++) gbc_mmu_write(&gbc, (uint16_t)(0xC000 + i), (uint8_t)(i + 1));
+    gbc_mmu_write(&gbc, 0xFF51, 0xC0); gbc_mmu_write(&gbc, 0xFF52, 0);
+    gbc_mmu_write(&gbc, 0xFF53, 0); gbc_mmu_write(&gbc, 0xFF54, 0);
+    gbc_mmu_write(&gbc, 0xFF55, 0x80);
+    gbc_ppu_fast_step(&gbc, (uint8_t)(gbc.fast->mode3_end - 80));
+    expect_u8("HDMA at HBlank", gbc.mmu.vram[0][0], 1);
+    expect_u8("HDMA cache dirty", gbc.fast->dirty[0][0], 255);
+    gbc_ppu_fast_step(&gbc, (uint8_t)(456 - gbc.fast->mode3_end));
+    expect_u8("LY poll", gbc_mmu_read(&gbc, 0xFF44), 1);
+    expect_u8("LYC STAT", gbc_mmu_read(&gbc, 0xFF41) & 4, 4);
+    gbc_mmu_write(&gbc, 0xFF51, 0xC0); gbc_mmu_write(&gbc, 0xFF52, 0);
+    gbc_mmu_write(&gbc, 0xFF53, 0); gbc_mmu_write(&gbc, 0xFF54, 0x10);
+    uint16_t pc = gbc.cpu.pc;
+    gbc_mmu_write(&gbc, 0xFF55, 0);
+    gbc_run_cycles(&gbc, 32);
+    expect_u16("GDMA CPU stall", gbc.cpu.pc, pc);
+    expect_u8("GDMA output", gbc.mmu.vram[0][16], 1);
+    expect_u8("GDMA dirty", gbc.fast->dirty[0][1], 255);
+    gbc.mmu.io[0x40] = 0;
+    gbc.cpu.pc = 0xFF80;
+    gbc.mmu.hram[0] = 0x18; gbc.mmu.hram[1] = 0xFE;
+    gbc_mmu_write(&gbc, 0xFF46, 0xC0);
+    expect_u8("OAM DMA blocks ROM", gbc_mmu_read(&gbc, 0x100), 255);
+    gbc_run_cycles(&gbc, 640);
+    expect_u16("RAM instruction execution", gbc.cpu.pc, 0xFF80);
+    expect_u16("OAM DMA completed", gbc.mmu.oam_dma_cycles, 0);
+    gbc_deinit_static(&gbc);
+}
+
 static uint32_t random_state = 17;
 static uint8_t random_byte(void)
 {
@@ -202,6 +245,7 @@ int main(void)
     core_reference_suite();
     test_budget_and_sync(); test_line_latch_and_cache(); test_audio_cadence_and_lifecycle();
     test_instruction_and_idle_equivalence(); test_audio_events();
+    test_dma_stat_and_palette();
     test_random_scanlines();
     printf("fast workspace=%u bytes; fast tests %s\n", (unsigned)sizeof(gbc_fast_t), test_failures ? "FAILED" : "passed");
     return test_failures ? 1 : 0;

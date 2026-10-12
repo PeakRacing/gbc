@@ -27,6 +27,16 @@ target("rom_fast_test", function ()
     add_defines("GBC_ENABLE_FAST_RUN=1", "GBC_SMOKE_FAST_RUN=1")
     add_files("../../src/**.c", "../../tests/rom_smoke_test.c")
 end)
+
+for _, streamed in ipairs({false, true}) do
+    target(streamed and "feature_fast_stream_test" or "feature_fast_test", function ()
+        set_kind("binary")
+        add_includedirs("../../tests/feature_port", "../../inc")
+        add_defines("GBC_ENABLE_FAST_RUN=1", "GBC_FEATURE_FAST_RUN=1", "GBC_ENABLE_SOUND=1", "GBC_ENABLE_BOOT_ROM=1")
+        if streamed then add_defines("GBC_ROM_STREAM=1") end
+        add_files("../../src/**.c", "../../tests/feature_test.c")
+    end)
+end
 add_cflags("/utf-8", {tools = "cl"})
 
 add_requires("libsdl2", {configs = {sdlmain = false}})
