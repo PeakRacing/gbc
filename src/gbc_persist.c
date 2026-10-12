@@ -246,6 +246,9 @@ int gbc_persist_load(gbc_t *gbc)
 
 int gbc_persist_save(gbc_t *gbc)
 {
+#if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
+    if (gbc && gbc->state_fault) { return GBC_ERROR_FORMAT; }
+#endif
     if (gbc == NULL) {
         return GBC_ERROR;
     }

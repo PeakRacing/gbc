@@ -22,6 +22,10 @@ static int gbc_has_rom_ext(const char *path)
     return gbc_memcmp(path + len - 3, ".gb", 3) == 0 || gbc_memcmp(path + len - 3, ".GB", 3) == 0;
 }
 
+#if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
+int gbc_sdl_set_path(const char *base);
+#endif
+
 int main(int argc, char **argv)
 {
     gbc_t *gbc = gbc_init();
@@ -41,10 +45,16 @@ int main(int argc, char **argv)
     ret = gbc_load_file(gbc, argv[1]);
     if (ret != GBC_OK) {
         GBC_LOG_ERROR("gbc load file fail: %d\n", ret);
+        gbc_unload_rom_discard(gbc);
         gbc_deinit(gbc);
         return -1;
     }
 
+#if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
+    if (gbc_sdl_set_path(argv[1]) != GBC_OK) {
+        GBC_LOG_WARN("state path too long; state shortcuts disabled\n");
+    }
+#endif
     gbc_run(gbc);
     gbc_unload_file(gbc);
     gbc_deinit(gbc);

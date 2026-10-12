@@ -40,3 +40,16 @@ transaction. Either failure is reported. A bad RTC file resets RTC data and
 blocks saving until explicitly detached or successfully reloaded. Regression
 tests cover day rollover, halt/carry, subsecond remainder, latched values,
 elapsed offline time, failed replacement and corrupted sidecars.
+
+## 即时存档
+
+核心默认 GBC_ENABLE_SAVE_STATE=0，需要文件系统。在指令边界调用
+`gbc_state_save_file()` / `gbc_state_load_file()`，返回错误码。
+GSTA v1 使用小端标量、分块和 CRC32，验证 ROM、配置与字段范围。
+排除指针、句柄、ROM、LRU 和可重绘画面；I/O 缓冲区为 256 字节，
+首次 ROM 校验另有 256 字节局部缓冲区，不分配完整状态副本。
+加载先验证再应用；验证失败保持状态，应用失败设置 state_fault/quit，
+必须放弃卸载并重新加载 ROM。恢复重建缓存、RTC 基准并通知平台清空音频。
+SDL：F5 保存 .state、F9 恢复、F6 保存 RAM/RTC；退出失败可重试或放弃。
+三款外部 ROM 的常驻/流式各运行180帧，恢复重放60帧的 CPU、MMU、画面、
+音频哈希均一致。此为有界主机验证，不是 MCU 或长期游戏存档验收。

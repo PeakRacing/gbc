@@ -251,6 +251,59 @@ int gbc_sound_output(uint8_t *buffer, size_t len)
     return GBC_OK;
 }
 
+
+#if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
+static char sdl_state_path[GBC_SAVE_PATH_MAX];
+
+int gbc_sdl_set_path(const char *base)
+{
+    int written = snprintf(sdl_state_path, sizeof(sdl_state_path), "%s.state", base);
+    if (written < 0 || (size_t)written >= sizeof(sdl_state_path)) {
+        sdl_state_path[0] = 0;
+        return GBC_ERROR_PATH;
+    }
+    return GBC_OK;
+}
+
+void gbc_state_loaded(gbc_t *gbc)
+{
+    (void)gbc;
+#if (GBC_ENABLE_SOUND == 1)
+    if (sdl_audio_device) { SDL_ClearQueuedAudio(sdl_audio_device); }
+#endif
+    sdl_next_frame_tick = 0;
+}
+#endif
+
+static void gbc_sdl_report(const char *action, int result)
+{
+    if (result != GBC_OK) {
+        char message[128];
+        snprintf(message, sizeof(message), "%s failed (%d). The previous file is retained.", action, result);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "GBC storage", message, sdl_window);
+    }
+}
+
+/** Normal quit saves first; the user can retry, continue playing or discard. */
+static void gbc_sdl_request_quit(gbc_t *gbc)
+{
+    for (;;) {
+        int ret = gbc_unload_rom(gbc);
+        if (ret == GBC_OK) { gbc->gbc_quit = 1; return; }
+        const SDL_MessageBoxButtonData buttons[] = {
+            {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, "Retry"},
+            {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 1, "Continue playing"},
+            {0, 2, "Discard and exit"}
+        };
+        const SDL_MessageBoxData box = {SDL_MESSAGEBOX_ERROR, sdl_window,
+            "GBC save failed", "Progress could not be saved. Retry or explicitly discard changes.",
+            3, buttons, NULL};
+        int selection = 1;
+        if (SDL_ShowMessageBox(&box, &selection) != 0 || selection == 1 || selection < 0) { return; }
+        if (selection == 2) { gbc_unload_rom_discard(gbc); gbc->gbc_quit = 1; return; }
+    }
+}
+
 void gbc_frame(gbc_t *gbc)
 {
     SDL_Event event;
@@ -260,12 +313,28 @@ void gbc_frame(gbc_t *gbc)
 
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_QUIT) {
-            gbc->gbc_quit = 1;
+            gbc_sdl_request_quit(gbc);
         } else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
             if (event.key.keysym.sym == SDLK_ESCAPE && event.type == SDL_KEYDOWN) {
-                gbc->gbc_quit = 1;
+                gbc_sdl_request_quit(gbc);
             }
-            sdl_set_key(gbc, event.key.keysym.scancode, event.type == SDL_KEYDOWN);
+            if (event.type == SDL_KEYDOWN && !event.key.repeat) {
+#if (GBC_PERSIST_ENABLE)
+                if (event.key.keysym.sym == SDLK_F6) { gbc_sdl_report("Battery/RTC save", gbc_persist_save(gbc)); }
+#endif
+#if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
+                if (event.key.keysym.sym == SDLK_F5 && sdl_state_path[0]) { gbc_sdl_report("State save", gbc_state_save_file(gbc, sdl_state_path)); }
+                if (event.key.keysym.sym == SDLK_F9 && sdl_state_path[0]) {
+                    int ret = gbc_state_load_file(gbc, sdl_state_path);
+                    gbc_sdl_report("State load", ret);
+                    if (gbc->state_fault) {
+                        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "GBC state load", "State application failed. Reload the ROM; battery files were not changed.", sdl_window);
+                        gbc_unload_rom_discard(gbc);
+                    }
+                }
+#endif
+            }
+            if (!gbc->gbc_quit) { sdl_set_key(gbc, event.key.keysym.scancode, event.type == SDL_KEYDOWN); }
         }
     }
 

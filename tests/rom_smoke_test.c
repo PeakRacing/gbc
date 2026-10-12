@@ -48,6 +48,9 @@
 static FILE *smoke_audio_file;
 static uint8_t smoke_audio_seen;
 static uint32_t smoke_audio_bytes;
+#if defined(GBC_SMOKE_STATE_REPLAY)
+static uint32_t smoke_audio_hash;
+#endif
 
 /*
  * Diagnostic ring buffers.  They are compiled in only when GBC_SMOKE_TRACE is
@@ -226,6 +229,9 @@ int gbc_sound_output(uint8_t *buffer, size_t len)
     if (buffer == NULL || len == 0) {
         return GBC_ERROR;
     }
+#if defined(GBC_SMOKE_STATE_REPLAY)
+    for (size_t i = 0; i < len; i++) { smoke_audio_hash = (smoke_audio_hash ^ buffer[i]) * 16777619UL; }
+#endif
     smoke_audio_seen = 1;
     smoke_audio_bytes += (uint32_t)len;
     if (smoke_audio_file != NULL) {
@@ -273,6 +279,39 @@ void gbc_frame(gbc_t *gbc)
 {
     (void)gbc;
 }
+
+
+#if defined(GBC_SMOKE_STATE_REPLAY)
+/** Replay external ROMs without writing any file beside their cartridge images. */
+static int smoke_state_replay(gbc_t *gbc)
+{
+    const char *path = "rom_replay.state";
+    uint32_t original_bytes = smoke_audio_bytes;
+    if (gbc_state_save_file(gbc, path) != GBC_OK) { return GBC_ERROR; }
+    uint32_t reference[4] = {0};
+    for (uint8_t pass = 0; pass < 2; pass++) {
+        if (pass && gbc_state_load_file(gbc, path) != GBC_OK) { remove(path); return GBC_ERROR; }
+        uint32_t target = gbc->frame_count + 60;
+        uint64_t cycles = 0;
+        smoke_audio_hash = 2166136261UL;
+        while (gbc->frame_count < target && cycles < 12000000ULL) { cycles += gbc_step(gbc); }
+        if (gbc->frame_count != target) { remove(path); return GBC_ERROR; }
+        uint32_t actual[4] = {
+            smoke_hash32((const uint8_t *)&gbc->cpu, sizeof(gbc->cpu)),
+            smoke_hash32((const uint8_t *)&gbc->mmu, sizeof(gbc->mmu)),
+            smoke_hash32((const uint8_t *)gbc->gbc_draw_data, sizeof(gbc->gbc_draw_data)),
+            smoke_audio_hash
+        };
+        if (!pass) { memcpy(reference, actual, sizeof(reference)); }
+        else if (memcmp(reference, actual, sizeof(reference))) { remove(path); return GBC_ERROR; }
+    }
+    int ret = gbc_state_load_file(gbc, path);
+    smoke_audio_bytes = original_bytes;
+    remove(path);
+    printf("state replay: %s (CPU, MMU, pixels, audio)\n", ret == GBC_OK ? "matched" : "FAILED");
+    return ret;
+}
+#endif
 
 int main(int argc, char **argv)
 {
@@ -384,6 +423,13 @@ int main(int argc, char **argv)
         }
         cycles_run += gbc_step(gbc);
     }
+#if defined(GBC_SMOKE_STATE_REPLAY)
+    if (smoke_state_replay(gbc) != GBC_OK) {
+        printf("FAIL state replay\n");
+        gbc_unload_rom_discard(gbc); gbc_deinit(gbc);
+        return 1;
+    }
+#endif
     smoke_request_quit(gbc);
 
     frames_run = gbc->frame_count - start_frame;

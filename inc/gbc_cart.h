@@ -70,6 +70,10 @@ typedef struct {
     uint32_t ram_size;
     uint8_t owns_rom;
     uint8_t owns_ram;
+#if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
+    uint32_t rom_crc;
+    uint8_t rom_crc_valid;
+#endif
     uint8_t ram_enable;
     uint8_t banking_mode;
     uint16_t rom_bank;

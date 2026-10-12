@@ -17,6 +17,7 @@ static int test_failures;
 static int feature_fault_write, feature_fault_sync, feature_fault_replace, feature_fault_close;
 static int feature_fault_read, feature_read_count;
 static unsigned feature_allocations;
+static uint32_t feature_audio_hash;
 static int test_fail_allocation;
 static int test_frees;
 
@@ -94,8 +95,7 @@ int gbc_draw(int x1, int y1, int x2, int y2, gbc_color_t *color_data)
 
 int gbc_sound_output(uint8_t *buffer, size_t len)
 {
-    (void)buffer;
-    (void)len;
+    for (size_t i = 0; i < len; i++) { feature_audio_hash = (feature_audio_hash ^ buffer[i]) * 16777619UL; }
     return GBC_OK;
 }
 
@@ -146,6 +146,8 @@ int gbc_file_sync(FILE *fp) { return feature_fault_sync ? -1 : feature_platform_
 int gbc_file_replace(const char *a, const char *b) { return feature_fault_replace ? -1 : feature_platform_replace(a, b); }
 int gbc_file_remove(const char *p) { return feature_platform_remove(p); }
 int gbc_file_exists(const char *p) { return feature_platform_exists(p); }
+
+void gbc_state_loaded(gbc_t *gbc) { (void)gbc; }
 
 static gbc_t feature_gbc;
 static uint8_t feature_rom[32768];
@@ -276,10 +278,89 @@ static void feature_rtc(void)
     remove("feature_test.sav");
 }
 
+
+static uint32_t feature_hash(const void *data, size_t size)
+{
+    const uint8_t *p = data;
+    uint32_t h = 2166136261UL;
+    while (size--) { h = (h ^ *p++) * 16777619UL; }
+    return h;
+}
+
+static void feature_run_frames(uint32_t n)
+{
+    uint32_t target = feature_gbc.frame_count + n;
+    unsigned steps = 0;
+    while (feature_gbc.frame_count < target && steps++ < 2000000) { gbc_step(&feature_gbc); }
+    CHECK(feature_gbc.frame_count == target);
+}
+
+static void feature_state(void)
+{
+    feature_setup(0x03);
+    remove("feature_test.state");
+    /* Keep execution in an intentionally authored NOP/JP loop. */
+    feature_rom[0x100] = 0;
+    feature_rom[0x101] = 0xC3;
+    feature_rom[0x102] = 0;
+    feature_rom[0x103] = 1;
+    feature_run_frames(2);
+    unsigned allocations = feature_allocations;
+    CHECK(gbc_state_save_file(&feature_gbc, "feature_test.state") == GBC_OK);
+    feature_audio_hash = 2166136261UL;
+    feature_run_frames(3);
+    uint32_t audio = feature_audio_hash;
+    uint32_t cpu = feature_hash(&feature_gbc.cpu, sizeof(feature_gbc.cpu));
+    uint32_t mmu = feature_hash(&feature_gbc.mmu, sizeof(feature_gbc.mmu));
+    uint32_t pixels = feature_hash(feature_gbc.gbc_draw_data, sizeof(feature_gbc.gbc_draw_data));
+    feature_read_count = 0;
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_test.state") == GBC_OK);
+    int load_reads = feature_read_count;
+    feature_audio_hash = 2166136261UL;
+    feature_run_frames(3);
+    CHECK(feature_audio_hash == audio);
+    CHECK(cpu == feature_hash(&feature_gbc.cpu, sizeof(feature_gbc.cpu)));
+    CHECK(mmu == feature_hash(&feature_gbc.mmu, sizeof(feature_gbc.mmu)));
+    CHECK(pixels == feature_hash(feature_gbc.gbc_draw_data, sizeof(feature_gbc.gbc_draw_data)));
+    CHECK(feature_allocations == allocations);
+    uint16_t pc = feature_gbc.cpu.pc;
+    FILE *fp = fopen("feature_test.state", "r+b");
+    CHECK(fp != NULL);
+    if (fp) { fseek(fp, 8, SEEK_SET); int b = fgetc(fp); fseek(fp, 8, SEEK_SET); fputc(b ^ 1, fp); fclose(fp); }
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_test.state") == GBC_ERROR_MISMATCH);
+    CHECK(feature_gbc.cpu.pc == pc);
+    CHECK(gbc_state_save_file(&feature_gbc, "feature_test.state") == GBC_OK);
+    fp = fopen("feature_test.state", "r+b");
+    CHECK(fp != NULL);
+    if (fp) { fseek(fp, 12, SEEK_SET); int b = fgetc(fp); fseek(fp, 12, SEEK_SET); fputc(b ^ 1, fp); fclose(fp); }
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_test.state") == GBC_ERROR_MISMATCH);
+    CHECK(feature_gbc.cpu.pc == pc);
+    CHECK(gbc_state_save_file(&feature_gbc, "feature_test.state") == GBC_OK);
+    fp = fopen("feature_test.state", "r+b");
+    CHECK(fp != NULL);
+    if (fp) { fseek(fp, 500, SEEK_SET); int b = fgetc(fp); fseek(fp, 500, SEEK_SET); fputc(b ^ 1, fp); fclose(fp); }
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_test.state") == GBC_ERROR_FORMAT);
+    CHECK(feature_gbc.cpu.pc == pc);
+    CHECK(gbc_state_save_file(&feature_gbc, "feature_test.state") == GBC_OK);
+    feature_fault_write = 1;
+    CHECK(gbc_state_save_file(&feature_gbc, "feature_test.state") == GBC_ERROR_IO);
+    feature_fault_write = 0;
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_test.state") == GBC_OK);
+    feature_read_count = 0;
+    feature_fault_read = (load_reads - 1) / 2 + 2;
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_test.state") == GBC_ERROR_IO);
+    CHECK(feature_gbc.gbc_quit == 1);
+    feature_fault_read = 0;
+    gbc_unload_rom_discard(&feature_gbc);
+    remove("feature_test.state");
+    remove("feature_test.sav");
+}
+
 int main(void)
 {
     feature_battery();
     feature_rtc();
+    feature_state();
     printf("feature regression tests: %s\n", test_failures ? "FAILED" : "passed");
     return test_failures ? 1 : 0;
 }

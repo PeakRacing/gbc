@@ -10,6 +10,9 @@ static void gbc_reset(gbc_t *gbc)
     gbc_model_t model = gbc->model;
 
     gbc->gbc_quit = 0;
+#if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
+    gbc->state_fault = 0;
+#endif
     gbc->frame_count = 0;
     gbc->last_frame_ticks = 0;
     gbc->model = model;
@@ -97,6 +100,9 @@ int gbc_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size)
 
 int gbc_unload_rom(gbc_t *gbc)
 {
+#if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
+    if (gbc && gbc->state_fault) { return GBC_ERROR_FORMAT; }
+#endif
     if (gbc == NULL) {
         return GBC_ERROR;
     }
@@ -114,6 +120,9 @@ int gbc_unload_rom_discard(gbc_t *gbc)
     if (gbc == NULL) {
         return GBC_ERROR;
     }
+#if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
+    gbc->state_fault = 0;
+#endif
     gbc_cart_unload(gbc);
     return GBC_OK;
 }

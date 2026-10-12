@@ -26,6 +26,9 @@
 
 typedef struct gbc {
     uint8_t gbc_quit;
+#if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
+    uint8_t state_fault;
+#endif
 #if (GBC_FRAME_SKIP != 0)
     uint8_t gbc_frame_skip_count;
 #endif
@@ -59,6 +62,13 @@ int gbc_set_model(gbc_t *gbc, gbc_model_t model);
 #if (GBC_USE_FS == 1)
 int gbc_load_file(gbc_t *gbc, const char *file_path);
 int gbc_unload_file(gbc_t *gbc);
+#endif
+
+#if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
+int gbc_state_save_file(gbc_t *gbc, const char *path);
+int gbc_state_load_file(gbc_t *gbc, const char *path);
+/* Port hook: discard queued audio and reset presentation pacing. */
+void gbc_state_loaded(gbc_t *gbc);
 #endif
 
 /* Borrow ROM storage without copying; keep it valid until unload. */
