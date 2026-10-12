@@ -489,6 +489,7 @@ int gbc_state_load_file(gbc_t *gbc, const char *path)
         gbc->cart.ram_dirty = 1;
 #endif
         gbc->gbc_quit = 0; gbc->last_frame_ticks = 0;
+        gbc_cart_rebuild_mapping(gbc);
         gbc_state_loaded(gbc);
     }
     return ret;

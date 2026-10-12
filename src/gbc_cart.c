@@ -533,15 +533,44 @@ static const uint8_t *gbc_cart_bank_ptr(gbc_cart_t *cart, uint16_t bank)
 #endif
 }
 
+void gbc_cart_rebuild_mapping(gbc_t *gbc)
+{
+#if (GBC_ROM_STREAM == 0)
+    gbc_cart_t *cart = &gbc->cart;
+    uint16_t fixed = cart->header.mbc == GBC_MBC1 && cart->banking_mode ?
+                     (uint16_t)(cart->mbc1_high2 << 5) : 0;
+    uint16_t switched = gbc_cart_mask_rom_bank(cart, cart->rom_bank, 1);
+    cart->rom_region[0] = cart->rom_data ? gbc_cart_bank_ptr(cart, gbc_cart_mask_rom_bank(cart, fixed, 0)) : NULL;
+    cart->rom_region[1] = cart->rom_data ? gbc_cart_bank_ptr(cart, gbc_cart_mask_rom_bank(cart, switched, 0)) : NULL;
+    cart->mapped_bank = cart->rom_bank;
+    cart->mapped_mode = cart->banking_mode;
+    cart->mapped_high = cart->mbc1_high2;
+#else
+    (void)gbc;
+#endif
+}
+
 uint8_t gbc_cart_read_rom(gbc_t *gbc, uint16_t addr)
 {
     gbc_cart_t *cart = &gbc->cart;
+#if (GBC_ROM_STREAM == 1)
     uint16_t bank = 0;
     const uint8_t *ptr;
+#endif
 
     if (cart->rom_data == NULL) {
         return 0xFF;
     }
+
+#if (GBC_ROM_STREAM == 0)
+    /* Also tolerate callers restoring mapper fields directly. Normal mapper
+     * writes/reset/load rebuild eagerly, so division stays off the hot path. */
+    if (!cart->rom_region[0] || cart->mapped_bank != cart->rom_bank ||
+        cart->mapped_mode != cart->banking_mode || cart->mapped_high != cart->mbc1_high2) {
+        gbc_cart_rebuild_mapping(gbc);
+    }
+    return cart->rom_region[addr < 0x4000 ? 0 : 1][addr & 0x3FFF];
+#else
 
     if (addr < 0x4000) {
         if (cart->header.mbc == GBC_MBC1 && cart->banking_mode) {
@@ -558,6 +587,7 @@ uint8_t gbc_cart_read_rom(gbc_t *gbc, uint16_t addr)
         return 0xFF;
     }
     return ptr[addr & 0x3FFF];
+#endif
 }
 
 uint8_t gbc_cart_read_ram(gbc_t *gbc, uint16_t addr)
@@ -637,7 +667,7 @@ void gbc_cart_write(gbc_t *gbc, uint16_t addr, uint8_t data)
 
     switch (cart->header.mbc) {
     case GBC_MBC_NONE:
-        return;
+        break;
     case GBC_MBC1:
         if (addr < 0x2000) {
             cart->ram_enable = ((data & 0x0F) == 0x0A);
@@ -658,7 +688,7 @@ void gbc_cart_write(gbc_t *gbc, uint16_t addr, uint8_t data)
             cart->banking_mode = data & 0x01;
             cart->ram_bank = cart->banking_mode ? cart->mbc1_high2 : 0;
         }
-        return;
+        break;
     case GBC_MBC2:
         if (addr < 0x4000) {
             if (addr & 0x0100) {
@@ -667,7 +697,7 @@ void gbc_cart_write(gbc_t *gbc, uint16_t addr, uint8_t data)
                 cart->ram_enable = ((data & 0x0F) == 0x0A);
             }
         }
-        return;
+        break;
     case GBC_MBC3:
         if (addr < 0x2000) {
             cart->ram_enable = ((data & 0x0F) == 0x0A);
@@ -683,7 +713,7 @@ void gbc_cart_write(gbc_t *gbc, uint16_t addr, uint8_t data)
         } else {
             gbc_cart_rtc_latch(gbc, data);
         }
-        return;
+        break;
     case GBC_MBC5:
         if (addr < 0x2000) {
             cart->ram_enable = ((data & 0x0F) == 0x0A);
@@ -695,9 +725,9 @@ void gbc_cart_write(gbc_t *gbc, uint16_t addr, uint8_t data)
             cart->ram_bank = data & 0x0F;
         }
         cart->rom_bank = gbc_cart_mask_rom_bank(cart, cart->rom_bank, 1);
-        return;
+        break;
     default:
-        return;
+        break;
     }
+    gbc_cart_rebuild_mapping(gbc);
 }
-

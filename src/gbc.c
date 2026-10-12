@@ -17,6 +17,7 @@ static void gbc_reset(gbc_t *gbc)
     gbc->last_frame_ticks = 0;
     gbc->model = model;
     gbc_cart_reset(gbc);
+    gbc_cart_rebuild_mapping(gbc);
     gbc_mmu_reset(gbc);
     gbc_timer_reset(gbc);
     gbc_joypad_reset(gbc);

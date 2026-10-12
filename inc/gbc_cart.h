@@ -77,6 +77,12 @@ typedef struct {
     uint8_t ram_enable;
     uint8_t banking_mode;
     uint16_t rom_bank;
+#if (GBC_ROM_STREAM == 0)
+    /* Derived resident mappings; never serialized. */
+    const uint8_t *rom_region[2];
+    uint16_t mapped_bank;
+    uint8_t mapped_mode, mapped_high;
+#endif
     uint8_t ram_bank;
     uint8_t mbc2_ram[512];
     uint8_t mbc1_low5;
@@ -108,6 +114,7 @@ int gbc_cart_load_file(struct gbc *gbc, const char *file_path);
 #endif
 void gbc_cart_unload(struct gbc *gbc);
 void gbc_cart_reset(struct gbc *gbc);
+void gbc_cart_rebuild_mapping(struct gbc *gbc);
 void gbc_cart_rtc_sync(struct gbc *gbc);
 uint8_t gbc_cart_read_rom(struct gbc *gbc, uint16_t addr);
 uint8_t gbc_cart_read_ram(struct gbc *gbc, uint16_t addr);
