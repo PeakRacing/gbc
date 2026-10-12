@@ -234,6 +234,27 @@ static void test_audio_batch_partition(void)
     gbc_deinit_static(&a);
 }
 
+static void test_late_ly_write_selection(void)
+{
+    gbc_t fast, ref;
+    fast_setup(&fast, 0);
+    gbc_mmu_write(&fast, 0xFF40, 0x93);
+    gbc_mmu_write(&fast, 0xFF47, 0xE4);
+    gbc_mmu_write(&fast, 0xFF48, 0xE4);
+    fast.mmu.io[0x44] = 8;
+    fast.mmu.oam[0] = 16; fast.mmu.oam[1] = 8;
+    fast.mmu.oam[2] = 1; fast.mmu.oam[3] = 0;
+    for (unsigned y = 0; y < 8; y++) gbc_mmu_write(&fast, (uint16_t)(0x8010 + y * 2), 0xFF);
+    gbc_ppu_fast_step(&fast, 80);
+    /* Preserve the core's existing LY-write behavior even during Mode 3. */
+    gbc_mmu_write(&fast, 0xFF44, 0);
+    ref = fast; ref.fast = NULL; ref.run_mode = GBC_RUN_REFERENCE;
+    gbc_ppu_render_scanline(&ref, 0);
+    gbc_ppu_fast_step(&fast, (uint8_t)(fast.fast->mode3_end - 80));
+    expect_int("LY write reselects sprites", memcmp(fast.ppu.line, ref.ppu.line, sizeof(ref.ppu.line)), 0);
+    gbc_deinit_static(&fast);
+}
+
 static uint32_t random_state = 17;
 static uint8_t random_byte(void)
 {
@@ -277,6 +298,7 @@ int main(void)
     test_instruction_and_idle_equivalence(); test_audio_events();
     test_dma_stat_and_palette();
     test_audio_batch_partition();
+    test_late_ly_write_selection();
     test_random_scanlines();
     printf("fast workspace=%u bytes; fast tests %s\n", (unsigned)sizeof(gbc_fast_t), test_failures ? "FAILED" : "passed");
     return test_failures ? 1 : 0;

@@ -326,7 +326,7 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
     }
 
 #if (GBC_ENABLE_FAST_RUN == 1)
-    if (gbc->fast && gbc->fast->rendering) {
+    if (gbc->fast && gbc->fast->rendering && gbc->fast->io[0x44] == ly) {
         sprite_count = gbc->fast->sprite_count;
         gbc_memcpy(sprites, gbc->fast->sprites, sprite_count);
     } else
