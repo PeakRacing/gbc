@@ -16,7 +16,21 @@
 
 GBC_INLINE uint8_t cpu_read8(gbc_t *gbc)
 {
-    uint8_t value = gbc_mmu_read(gbc, gbc->cpu.pc);
+    uint8_t value;
+#if (GBC_ENABLE_FAST_RUN == 1) && (GBC_ROM_STREAM == 0)
+    uint16_t pc = gbc->cpu.pc;
+    /* Eager mapper rebuilds make instruction fetch a resident-bank lookup.
+     * DMA, boot overlays, RAM execution and streamed ROM retain the MMU path. */
+    if (gbc->run_mode == GBC_RUN_FAST && pc < 0x8000 &&
+        !gbc->mmu.oam_dma_cycles
+#if (GBC_ENABLE_BOOT_ROM == 1)
+        && !gbc->boot_active
+#endif
+        && gbc->cart.rom_region[pc >> 14]) {
+        value = gbc->cart.rom_region[pc >> 14][pc & 0x3FFF];
+    } else
+#endif
+    value = gbc_mmu_read(gbc, gbc->cpu.pc);
 
     if (gbc->cpu.halt_bug) {
         gbc->cpu.halt_bug = 0;
