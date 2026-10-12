@@ -15,6 +15,7 @@
 static int test_failures;
 static uint8_t last_sound_buffer[128];
 static size_t last_sound_len;
+static size_t total_sound_bytes, nonzero_sound_bytes;
 
 void *gbc_malloc(int num) { return malloc((size_t)num); }
 void gbc_free(void *address) { free(address); }
@@ -35,6 +36,8 @@ int gbc_draw(int x1, int y1, int x2, int y2, gbc_color_t *color_data)
 
 int gbc_sound_output(uint8_t *buffer, size_t len)
 {
+    total_sound_bytes += len;
+    for (size_t i = 0; i < len; i++) nonzero_sound_bytes += buffer[i] != 0;
     if (len > sizeof(last_sound_buffer)) {
         len = sizeof(last_sound_buffer);
     }
@@ -133,8 +136,32 @@ static void test_apu_outputs_interleaved_stereo_samples(void)
     (void)last_sound_len;
 }
 
+static void test_nr52_off_preserves_pcm_clock(void)
+{
+    gbc_t gbc;
+    gbc_memset(&gbc, 0, sizeof(gbc)); gbc_apu_reset(&gbc);
+    gbc_apu_write(&gbc, 0x26, 0);
+    gbc.apu.square1.enabled = 1; gbc.apu.square1.timer = 123;
+    gbc.apu.wave.enabled = 1; gbc.apu.wave.timer = 456;
+    gbc.apu.noise.enabled = 1; gbc.apu.noise.timer = 789;
+    total_sound_bytes = nonzero_sound_bytes = 0;
+    for (unsigned i = 0; i < GBC_CPU_CLOCK_FREQ / 4; i++) gbc_apu_step(&gbc, 4);
+    size_t expected = (GBC_APU_SAMPLE_RATE / GBC_APU_BUFFER_SAMPLES) * GBC_APU_BUFFER_SAMPLES * 4;
+    if (total_sound_bytes != expected || nonzero_sound_bytes) test_failures++;
+    expect_u16("NR52-off square frozen", gbc.apu.square1.timer, 123);
+    expect_u16("NR52-off wave frozen", gbc.apu.wave.timer, 456);
+    expect_u16("NR52-off noise frozen", (uint16_t)gbc.apu.noise.timer, 789);
+    expect_u16("NR52-off sequencer frozen", (uint16_t)gbc.apu.frame_acc, 0);
+    gbc_apu_write(&gbc, 0x26, 0x80); gbc_apu_write(&gbc, 0x24, 0x77);
+    gbc_apu_write(&gbc, 0x25, 0x11); gbc_apu_write(&gbc, 0x11, 0x80);
+    gbc_apu_write(&gbc, 0x12, 0xF0); gbc_apu_write(&gbc, 0x14, 0x80);
+    for (unsigned i = 0; i < 12000; i++) gbc_apu_step(&gbc, 4);
+    if (!nonzero_sound_bytes) { puts("FAIL NR52 re-enable PCM"); test_failures++; }
+}
+
 int main(void)
 {
+    test_nr52_off_preserves_pcm_clock();
     test_ch1_clearing_negate_after_negative_sweep_disables_channel();
     test_apu_outputs_interleaved_stereo_samples();
 
