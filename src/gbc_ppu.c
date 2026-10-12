@@ -51,14 +51,6 @@ GBC_INLINE gbc_color_t gbc_ppu_cgb_color(const uint8_t *palette, uint8_t palette
     return gbc_ppu_color(raw & 0x1F, (raw >> 5) & 0x1F, (raw >> 10) & 0x1F);
 }
 
-GBC_INLINE gbc_color_t gbc_ppu_bg_color(gbc_t *gbc, uint8_t palette, uint8_t index)
-{
-#if (GBC_ENABLE_FAST_RUN == 1)
-    if (gbc->fast && gbc->fast->rendering) return gbc->fast->bg[palette * 4 + index];
-#endif
-    return gbc_ppu_cgb_color(gbc->ppu.bg_palette, palette, index);
-}
-
 GBC_INLINE gbc_color_t gbc_ppu_obj_color(gbc_t *gbc, uint8_t palette, uint8_t index)
 {
 #if (GBC_ENABLE_FAST_RUN == 1)
@@ -290,18 +282,24 @@ static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
             }
         }
 
-        color_id = gbc_ppu_tile_pixel(gbc, tile_addr, tile_px, tile_py, bank);
+        {
+            uint16_t row = (uint16_t)(tile_addr + tile_py * 2);
+            uint8_t lo = mmu->vram[bank][row & 0x1FFF];
+            uint8_t hi = mmu->vram[bank][(row + 1) & 0x1FFF];
+            uint8_t bit = (uint8_t)(7 - tile_px);
+            color_id = (uint8_t)(((lo >> bit) & 1) | (((hi >> bit) & 1) << 1));
+        }
         ppu->bg_color_id[x] = color_id;
         ppu->bg_priority[x] = (model == GBC_MODEL_CGB && (attr & 0x80)) ? 1 : 0;
         if (model == GBC_MODEL_CGB) {
-            ppu->line[x] = gbc_ppu_bg_color(gbc, attr & 0x07, color_id);
+            ppu->line[x] = gbc_ppu_cgb_color(ppu->bg_palette, attr & 0x07, color_id);
         } else {
 #if (GBC_ENABLE_BOOT_ROM == 1)
             if (gbc->boot_compat) {
-                ppu->line[x] = gbc_ppu_bg_color(gbc, 0, (io[0x47] >> (color_id * 2)) & 3);
+                ppu->line[x] = gbc_ppu_cgb_color(ppu->bg_palette, 0, (io[0x47] >> (color_id * 2)) & 3);
             } else
 #endif
-            { ppu->line[x] = gbc_ppu_gray_color(gbc, 0x47, color_id); }
+            { ppu->line[x] = gbc_ppu_dmg_color(io[0x47], color_id); }
         }
     }
     return win_used;
