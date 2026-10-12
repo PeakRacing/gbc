@@ -325,6 +325,12 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
         return;
     }
 
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (gbc->fast && gbc->fast->rendering) {
+        sprite_count = gbc->fast->sprite_count;
+        gbc_memcpy(sprites, gbc->fast->sprites, sprite_count);
+    } else
+#endif
     for (uint8_t i = 0; i < GBC_OAM_ENTRIES && sprite_count < 10; i++) {
         uint8_t *oam = &oam_data[i * 4];
         int16_t sy = (int16_t)oam[0] - 16;
@@ -551,7 +557,17 @@ static void gbc_ppu_fast_latch(gbc_t *gbc)
     gbc_memcpy(fast->obj, fast->live_obj, sizeof(fast->obj));
     gbc_memcpy(fast->dmg, fast->live_dmg, sizeof(fast->dmg));
     fast->latched = 1;
-    fast->mode3_end = gbc_ppu_mode3_end(gbc, gbc->mmu.io[0x44]);
+    fast->sprite_count = 0;
+    if (fast->io[0x40] & 2) {
+        uint8_t height = (fast->io[0x40] & 4) ? 16 : 8;
+        uint8_t ly = fast->io[0x44];
+        for (uint8_t i = 0; i < 40 && fast->sprite_count < 10; i++) {
+            int16_t sy = (int16_t)fast->oam[i * 4] - 16;
+            if (ly >= sy && ly < sy + height) fast->sprites[fast->sprite_count++] = i;
+        }
+    }
+    uint16_t end = (uint16_t)(252 + (fast->io[0x43] & 7) + fast->sprite_count * 6);
+    fast->mode3_end = end > 289 ? 289 : end;
 }
 
 void gbc_ppu_fast_step(gbc_t *gbc, uint8_t cycles)

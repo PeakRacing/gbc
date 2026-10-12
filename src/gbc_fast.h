@@ -12,6 +12,7 @@ typedef struct gbc_fast {
     uint16_t next_dot, mode3_end;
     uint32_t apu_pending;
     uint8_t rendering, latched;
+    uint8_t sprites[10], sprite_count; /* Mode-2 selection in OAM order */
 } gbc_fast_t;
 typedef char gbc_fast_workspace_must_fit_64k[(sizeof(gbc_fast_t) <= 65536) ? 1 : -1];
 void gbc_fast_rebuild(gbc_t *gbc);
