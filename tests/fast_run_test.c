@@ -9,11 +9,15 @@
 #include "../src/gbc_fast.h"
 
 static uint32_t pcm_frames, pcm_nonzero;
+static uint32_t pcm_hash;
 static int callback_switch;
 int gbc_sound_output(uint8_t *buffer, size_t bytes)
 {
     pcm_frames += (uint32_t)(bytes / 4);
-    for (size_t i = 0; i < bytes; i++) pcm_nonzero += buffer[i] != 0;
+    for (size_t i = 0; i < bytes; i++) {
+        pcm_nonzero += buffer[i] != 0;
+        pcm_hash = (pcm_hash ^ buffer[i]) * 16777619U;
+    }
     return GBC_OK;
 }
 void gbc_frame(gbc_t *gbc) { callback_switch = gbc_set_run_mode(gbc, GBC_RUN_REFERENCE); }
@@ -204,6 +208,32 @@ static void test_dma_stat_and_palette(void)
     gbc_deinit_static(&gbc);
 }
 
+static void test_audio_batch_partition(void)
+{
+    gbc_t a, b;
+    fast_setup(&a, 1);
+    gbc_apu_write(&a, 0x26, 0x80);
+    gbc_apu_write(&a, 0x24, 0x77); gbc_apu_write(&a, 0x25, 0xFF);
+    gbc_apu_write(&a, 0x11, 0x80); gbc_apu_write(&a, 0x12, 0xF3);
+    gbc_apu_write(&a, 0x13, 0x81); gbc_apu_write(&a, 0x14, 0x87);
+    gbc_apu_write(&a, 0x16, 0x40); gbc_apu_write(&a, 0x17, 0x93);
+    gbc_apu_write(&a, 0x18, 0x31); gbc_apu_write(&a, 0x19, 0x85);
+    gbc_apu_write(&a, 0x1A, 0x80); gbc_apu_write(&a, 0x1C, 0x20);
+    gbc_apu_write(&a, 0x1D, 0x71); gbc_apu_write(&a, 0x1E, 0x86);
+    gbc_apu_write(&a, 0x21, 0xE2); gbc_apu_write(&a, 0x22, 0x19);
+    gbc_apu_write(&a, 0x23, 0x80);
+    b = a; b.fast = NULL;
+    pcm_frames = 0; pcm_hash = 2166136261U;
+    for (unsigned i = 0; i < 262144; i += 128) gbc_apu_fast_step(&a, 128);
+    uint32_t count = pcm_frames, hash = pcm_hash;
+    pcm_frames = 0; pcm_hash = 2166136261U;
+    for (unsigned i = 0; i < 262144; i += 512) gbc_apu_fast_step(&b, 512);
+    expect_int("batch PCM count", pcm_frames, count);
+    expect_int("batch PCM bytes", pcm_hash == hash, 1);
+    expect_int("batch APU phase/state", memcmp(&a.apu, &b.apu, sizeof(a.apu)), 0);
+    gbc_deinit_static(&a);
+}
+
 static uint32_t random_state = 17;
 static uint8_t random_byte(void)
 {
@@ -246,6 +276,7 @@ int main(void)
     test_budget_and_sync(); test_line_latch_and_cache(); test_audio_cadence_and_lifecycle();
     test_instruction_and_idle_equivalence(); test_audio_events();
     test_dma_stat_and_palette();
+    test_audio_batch_partition();
     test_random_scanlines();
     printf("fast workspace=%u bytes; fast tests %s\n", (unsigned)sizeof(gbc_fast_t), test_failures ? "FAILED" : "passed");
     return test_failures ? 1 : 0;

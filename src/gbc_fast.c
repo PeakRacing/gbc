@@ -1,6 +1,10 @@
 /* Copyright PeakRacing; SPDX-License-Identifier: Apache-2.0 */
 #include "gbc_fast.h"
 
+/* Nominal 0.122 ms at the base clock, with whole-instruction overshoot.
+ * MMIO and run-call boundaries settle earlier; large budgets stay bounded. */
+#define GBC_FAST_AUDIO_BATCH_DOTS 512U
+
 int gbc_set_run_mode(gbc_t *gbc, gbc_run_mode_t mode)
 {
     if (!gbc) return GBC_ERROR;
@@ -87,7 +91,7 @@ static uint8_t gbc_fast_idle_cycles(gbc_t *gbc, uint32_t remaining)
     }
     if (gbc->mmu.serial_cycles && gbc->mmu.serial_cycles < limit) limit = gbc->mmu.serial_cycles;
     if (gbc->mmu.oam_dma_cycles && gbc->mmu.oam_dma_cycles < limit) limit = gbc->mmu.oam_dma_cycles;
-    event = (128 - gbc->fast->apu_pending) << gbc->mmu.double_speed;
+    event = (GBC_FAST_AUDIO_BATCH_DOTS - gbc->fast->apu_pending) << gbc->mmu.double_speed;
     if (event < limit) limit = event;
     /* HALT still observes events on its original four-clock boundary. */
     limit = (limit + 3) & ~3UL;
@@ -118,7 +122,7 @@ uint32_t gbc_run_cycles(gbc_t *gbc, uint32_t budget)
             gbc_ppu_fast_step(gbc, dots);
             gbc->fast->apu_pending += dots;
             /* Bound audio/control latency even with the LCD disabled. */
-            if (gbc->fast->apu_pending >= 128) gbc_fast_flush_audio(gbc);
+            if (gbc->fast->apu_pending >= GBC_FAST_AUDIO_BATCH_DOTS) gbc_fast_flush_audio(gbc);
             total += cycles;
             if (gbc->ppu.frame_ready) {
                 gbc->ppu.frame_ready = 0;
