@@ -251,6 +251,9 @@ static void gbc_mmu_write_io(gbc_t *gbc, uint8_t reg, uint8_t data)
         return;
     default:
         gbc->mmu.io[reg] = data;
+#if (GBC_ENABLE_FAST_RUN == 1)
+        if (reg >= 0x47 && reg <= 0x49) gbc_fast_dmg_palette_write(gbc, reg);
+#endif
         return;
     }
 }

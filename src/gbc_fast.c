@@ -25,6 +25,16 @@ int gbc_set_run_mode(gbc_t *gbc, gbc_run_mode_t mode)
 }
 
 #if (GBC_ENABLE_FAST_RUN == 1)
+void gbc_fast_dmg_palette_write(gbc_t *gbc, uint8_t reg)
+{
+    static const uint8_t shades[4] = {31, 21, 10, 0};
+    if (!gbc->fast) return;
+    for (uint8_t c = 0; c < 4; c++) {
+        uint8_t value = shades[(gbc->mmu.io[reg] >> (c * 2)) & 3];
+        gbc->fast->live_dmg[reg - 0x47][c] = gbc_ppu_color(value, value, value);
+    }
+}
+
 void gbc_fast_palette_write(gbc_t *gbc, uint8_t object, uint8_t byte)
 {
     if (!gbc->fast) return;
@@ -47,6 +57,7 @@ void gbc_fast_rebuild(gbc_t *gbc)
         gbc_fast_palette_write(gbc, 0, i);
         gbc_fast_palette_write(gbc, 1, i);
     }
+    for (uint8_t reg = 0x47; reg <= 0x49; reg++) gbc_fast_dmg_palette_write(gbc, reg);
 }
 
 void gbc_fast_flush_audio(gbc_t *gbc)

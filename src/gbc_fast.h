@@ -8,6 +8,7 @@ typedef struct gbc_fast {
     uint8_t io[0x80], oam[160];
     gbc_color_t bg[32], obj[32], dmg[3][4];
     gbc_color_t live_bg[32], live_obj[32];
+    gbc_color_t live_dmg[3][4];
     uint16_t next_dot, mode3_end;
     uint32_t apu_pending;
     uint8_t rendering, latched;
@@ -18,6 +19,7 @@ void gbc_fast_flush_audio(gbc_t *gbc);
 void gbc_apu_fast_step(gbc_t *gbc, uint32_t cycles);
 void gbc_ppu_fast_step(gbc_t *gbc, uint8_t cycles);
 void gbc_fast_palette_write(gbc_t *gbc, uint8_t object, uint8_t byte);
+void gbc_fast_dmg_palette_write(gbc_t *gbc, uint8_t reg);
 GBC_INLINE void gbc_fast_vram_dirty(gbc_t *gbc, uint8_t bank, uint16_t addr)
 {
     if (gbc->fast && (addr & 0x1FFF) < 0x1800) {

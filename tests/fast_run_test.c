@@ -60,6 +60,7 @@ static void test_line_latch_and_cache(void)
     gbc_t gbc;
     fast_setup(&gbc, 0);
     gbc.mmu.io[0x40] = 0x91; gbc.mmu.io[0x47] = 0xE4;
+    gbc_fast_dmg_palette_write(&gbc, 0x47);
     for (unsigned y = 0; y < 8; y++) gbc_mmu_write(&gbc, (uint16_t)(0x8000 + y * 2), 0xFF);
     gbc_ppu_fast_step(&gbc, 80);
     expect_u8("mode 3", gbc.ppu.mode, 3);

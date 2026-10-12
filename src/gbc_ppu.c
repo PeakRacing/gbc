@@ -551,11 +551,7 @@ static void gbc_ppu_fast_latch(gbc_t *gbc)
     gbc_memcpy(fast->io, gbc->mmu.io, sizeof(fast->io));
     gbc_memcpy(fast->bg, fast->live_bg, sizeof(fast->bg));
     gbc_memcpy(fast->obj, fast->live_obj, sizeof(fast->obj));
-    for (uint8_t p = 0; p < 3; p++) {
-        for (uint8_t c = 0; c < 4; c++) {
-            fast->dmg[p][c] = gbc_ppu_dmg_color(fast->io[0x47 + p], c);
-        }
-    }
+    gbc_memcpy(fast->dmg, fast->live_dmg, sizeof(fast->dmg));
     fast->latched = 1;
     fast->mode3_end = gbc_ppu_mode3_end(gbc, gbc->mmu.io[0x44]);
 }
