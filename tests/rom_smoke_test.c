@@ -373,6 +373,11 @@ int main(int argc, char **argv)
         return 1;
     }
 
+#if defined(GBC_SMOKE_FAST_RUN) && GBC_SMOKE_FAST_RUN
+    if (gbc_set_run_mode(gbc, GBC_RUN_FAST) != GBC_OK) {
+        printf("FAIL enable fast mode\n"); gbc_deinit(gbc); return 1;
+    }
+#endif
     printf("context bytes: %zu\n", sizeof(*gbc));
     printf("rom: %s\n", rom_path);
     printf("title: %.16s\n", gbc->cart.header.title);

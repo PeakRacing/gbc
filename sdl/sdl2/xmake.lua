@@ -20,6 +20,13 @@ target("fast_run_test", function ()
     add_defines("GBC_ENABLE_FAST_RUN=1", "GBC_ENABLE_SOUND=1")
     add_files("../../src/**.c", "../../tests/fast_run_test.c", "../../tests/fs_hooks.c")
 end)
+
+target("rom_fast_test", function ()
+    set_kind("binary")
+    add_includedirs("../../tests/rom_port", "../../inc")
+    add_defines("GBC_ENABLE_FAST_RUN=1", "GBC_SMOKE_FAST_RUN=1")
+    add_files("../../src/**.c", "../../tests/rom_smoke_test.c")
+end)
 add_cflags("/utf-8", {tools = "cl"})
 
 add_requires("libsdl2", {configs = {sdlmain = false}})

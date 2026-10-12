@@ -630,3 +630,27 @@ void gbc_apu_step(gbc_t *gbc, uint8_t cycles)
 #endif
 }
 
+#if (GBC_ENABLE_FAST_RUN == 1)
+void gbc_apu_fast_step(gbc_t *gbc, uint32_t cycles)
+{
+#if (GBC_ENABLE_SOUND == 1)
+    gbc_apu_t *apu = &gbc->apu;
+    while (cycles) {
+        uint32_t to_sample = (GBC_CPU_CLOCK_FREQ - apu->sample_acc + GBC_APU_SAMPLE_RATE - 1) / GBC_APU_SAMPLE_RATE;
+        uint32_t part = cycles < to_sample ? cycles : to_sample;
+        if (apu->enabled) {
+            uint32_t to_frame = (GBC_CPU_CLOCK_FREQ - apu->frame_acc + 511) / 512;
+            if (to_frame < part) part = to_frame;
+        }
+        if (part > 255) part = 255;
+        /* Same length/envelope/sweep order as the reference, now bounded by
+         * sample and sequencer events rather than instruction count. */
+        gbc_apu_step(gbc, (uint8_t)part);
+        cycles -= part;
+    }
+#else
+    (void)gbc; (void)cycles;
+#endif
+}
+#endif
+

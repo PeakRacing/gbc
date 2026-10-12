@@ -103,10 +103,105 @@ static void test_audio_cadence_and_lifecycle(void)
     gbc_deinit_static(&gbc);
 }
 
+static void test_instruction_and_idle_equivalence(void)
+{
+    gbc_t fast, ref;
+    for (unsigned scenario = 0; scenario < 256; scenario++) {
+        fast_setup(&fast, 1);
+        fast.cpu.halted = scenario & 1;
+        fast.cpu.ime = (scenario >> 1) & 1;
+        fast.mmu.double_speed = (scenario >> 2) & 1;
+        fast.mmu.io[0x07] = (uint8_t)((scenario >> 3) & 7);
+        fast.mmu.io[0x05] = (scenario & 0x40) ? 255 : 13;
+        fast.mmu.io[0x06] = 57;
+        fast.mmu.ie = (scenario & 0x80) ? 0x1F : 0;
+        fast.mmu.io[0x0F] = 0;
+        fast.mmu.serial_cycles = 4096;
+        fast.timer.div_counter = (uint16_t)(scenario * 37);
+        ref = fast; ref.fast = NULL; ref.run_mode = GBC_RUN_REFERENCE;
+        for (unsigned n = 0; n < 64; n++) {
+            unsigned actual = gbc_run_cycles(&fast, (n * 17 % 251) + 1);
+            unsigned consumed = 0;
+            while (consumed < actual) consumed += gbc_step(&ref);
+            expect_int("identical instruction clocks", consumed, actual);
+            expect_int("identical CPU", memcmp(&fast.cpu, &ref.cpu, sizeof(ref.cpu)), 0);
+            expect_int("identical Timer", memcmp(&fast.timer, &ref.timer, sizeof(ref.timer)), 0);
+            expect_int("identical MMU/IRQs", memcmp(&fast.mmu, &ref.mmu, sizeof(ref.mmu)), 0);
+            if (test_failures) break;
+        }
+        gbc_deinit_static(&fast);
+        gbc_deinit_static(&ref);
+        if (test_failures) break;
+    }
+}
+
+static void test_audio_events(void)
+{
+    gbc_t gbc;
+    fast_setup(&gbc, 0);
+    gbc_apu_write(&gbc, 0x26, 0x80);
+    gbc_apu_write(&gbc, 0x24, 0x77); gbc_apu_write(&gbc, 0x25, 0x11);
+    gbc_apu_write(&gbc, 0x11, 0x80); gbc_apu_write(&gbc, 0x12, 0xF0);
+    gbc_apu_write(&gbc, 0x13, 0); gbc_apu_write(&gbc, 0x14, 0x84); /* period 4096 */
+    pcm_frames = pcm_nonzero = 0;
+    gbc_apu_fast_step(&gbc, 4096 * 8);
+    expect_u8("square period phase", gbc.apu.square1.duty_step, 0);
+    expect_u16("square period timer", gbc.apu.square1.timer, 4096);
+    for (unsigned i = 0; i < gbc.apu.sample_index * 4U; i++) pcm_nonzero += gbc.apu.sample_buffer[i] != 0;
+    expect_int("active PCM", pcm_nonzero != 0, 1);
+    gbc.fast->apu_pending = 32;
+    uint32_t before = gbc.apu.sample_acc;
+    gbc_apu_write(&gbc, 0x26, 0);
+    expect_int("register settles time", gbc.apu.sample_acc, (before + 32 * GBC_APU_SAMPLE_RATE) % GBC_CPU_CLOCK_FREQ);
+    expect_int("register drains pending", gbc.fast->apu_pending, 0);
+    gbc_apu_write(&gbc, 0x26, 0x80);
+    expect_u8("re-enable", gbc.apu.enabled, 1);
+    expect_u8("trigger required", gbc.apu.square1.enabled, 0);
+    gbc_deinit_static(&gbc);
+}
+
+static uint32_t random_state = 17;
+static uint8_t random_byte(void)
+{
+    random_state ^= random_state << 13; random_state ^= random_state >> 17;
+    random_state ^= random_state << 5; return (uint8_t)random_state;
+}
+static void test_random_scanlines(void)
+{
+    gbc_t fast, ref;
+    fast_setup(&fast, 1);
+    for (unsigned scene = 0; scene < 10000; scene++) {
+        fast.model = (scene & 1) ? GBC_MODEL_CGB : GBC_MODEL_DMG;
+        uint8_t ly = random_byte() % 144;
+        fast.mmu.io[0x44] = ly;
+        for (unsigned i = 0; i < sizeof(fast.mmu.vram); i++) ((uint8_t *)fast.mmu.vram)[i] = random_byte();
+        for (unsigned i = 0; i < sizeof(fast.mmu.oam); i++) fast.mmu.oam[i] = random_byte();
+        for (unsigned i = 0x40; i < 0x4C; i++) fast.mmu.io[i] = random_byte();
+        fast.mmu.io[0x40] |= 0x80; fast.mmu.io[0x44] = ly;
+        for (unsigned i = 0; i < 64; i++) {
+            fast.ppu.bg_palette[i] = random_byte(); fast.ppu.obj_palette[i] = random_byte();
+        }
+        fast.ppu.win_line = random_byte(); fast.ppu.dot_cycles = 0;
+        gbc_fast_rebuild(&fast);
+        ref = fast; ref.fast = NULL; ref.run_mode = GBC_RUN_REFERENCE;
+        gbc_ppu_render_scanline(&ref, ly);
+        gbc_ppu_fast_step(&fast, 80);
+        unsigned remaining = fast.fast->mode3_end - 80;
+        gbc_ppu_fast_step(&fast, (uint8_t)remaining);
+        expect_int("random fast line", memcmp(fast.ppu.line, ref.ppu.line, sizeof(ref.ppu.line)), 0);
+        expect_int("random priority", memcmp(fast.ppu.bg_priority, ref.ppu.bg_priority, sizeof(ref.ppu.bg_priority)), 0);
+        expect_int("random IDs", memcmp(fast.ppu.bg_color_id, ref.ppu.bg_color_id, sizeof(ref.ppu.bg_color_id)), 0);
+        if (test_failures) break;
+    }
+    gbc_deinit_static(&fast);
+}
+
 int main(void)
 {
     core_reference_suite();
     test_budget_and_sync(); test_line_latch_and_cache(); test_audio_cadence_and_lifecycle();
+    test_instruction_and_idle_equivalence(); test_audio_events();
+    test_random_scanlines();
     printf("fast workspace=%u bytes; fast tests %s\n", (unsigned)sizeof(gbc_fast_t), test_failures ? "FAILED" : "passed");
     return test_failures ? 1 : 0;
 }

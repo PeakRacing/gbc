@@ -15,6 +15,7 @@ typedef struct gbc_fast {
 typedef char gbc_fast_workspace_must_fit_64k[(sizeof(gbc_fast_t) <= 65536) ? 1 : -1];
 void gbc_fast_rebuild(gbc_t *gbc);
 void gbc_fast_flush_audio(gbc_t *gbc);
+void gbc_apu_fast_step(gbc_t *gbc, uint32_t cycles);
 void gbc_ppu_fast_step(gbc_t *gbc, uint8_t cycles);
 void gbc_fast_palette_write(gbc_t *gbc, uint8_t object, uint8_t byte);
 GBC_INLINE void gbc_fast_vram_dirty(gbc_t *gbc, uint8_t bank, uint16_t addr)

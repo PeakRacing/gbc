@@ -54,11 +54,33 @@ void gbc_fast_flush_audio(gbc_t *gbc)
     if (!gbc->fast) return;
     uint32_t cycles = gbc->fast->apu_pending;
     gbc->fast->apu_pending = 0;
-    while (cycles) {
-        uint8_t part = cycles > 255 ? 255 : (uint8_t)cycles;
-        gbc_apu_step(gbc, part);
-        cycles -= part;
+    gbc_apu_fast_step(gbc, cycles);
+}
+#endif
+
+#if (GBC_ENABLE_FAST_RUN == 1)
+static uint8_t gbc_fast_idle_cycles(gbc_t *gbc, uint32_t remaining)
+{
+    uint32_t limit = remaining < 252 ? remaining : 252;
+    uint32_t event;
+    if ((gbc->mmu.io[0x40] & 0x80) && gbc->fast->next_dot > gbc->ppu.dot_cycles) {
+        event = (gbc->fast->next_dot - gbc->ppu.dot_cycles) << gbc->mmu.double_speed;
+        if (event < limit) limit = event;
+    } else if (gbc->mmu.io[0x40] & 0x80) return 4;
+    if (gbc->timer.tima_reload_delay && gbc->timer.tima_reload_delay < limit) limit = gbc->timer.tima_reload_delay;
+    if (gbc->mmu.io[0x07] & 4) {
+        static const uint16_t periods[4] = {1024, 16, 64, 256};
+        uint16_t period = periods[gbc->mmu.io[0x07] & 3];
+        event = period - (gbc->timer.div_counter & (period - 1));
+        if (event < limit) limit = event;
     }
+    if (gbc->mmu.serial_cycles && gbc->mmu.serial_cycles < limit) limit = gbc->mmu.serial_cycles;
+    if (gbc->mmu.oam_dma_cycles && gbc->mmu.oam_dma_cycles < limit) limit = gbc->mmu.oam_dma_cycles;
+    event = (128 - gbc->fast->apu_pending) << gbc->mmu.double_speed;
+    if (event < limit) limit = event;
+    /* HALT still observes events on its original four-clock boundary. */
+    limit = (limit + 3) & ~3UL;
+    return (uint8_t)(limit < 4 ? 4 : limit);
 }
 #endif
 
@@ -70,7 +92,12 @@ uint32_t gbc_run_cycles(gbc_t *gbc, uint32_t budget)
     if (gbc->run_mode == GBC_RUN_FAST) {
         gbc->running = 1;
         do {
-            uint8_t cycles = gbc_cpu_step(gbc);
+            uint8_t cycles;
+            if (gbc->cpu.halted && !gbc->mmu.hdma_busy_cycles &&
+                !(gbc->mmu.ie & gbc->mmu.io[0x0F] & 0x1F)) {
+                cycles = gbc_fast_idle_cycles(gbc, budget - total);
+                gbc->cpu.cycles += cycles;
+            } else cycles = gbc_cpu_step(gbc);
             uint8_t dots = gbc->mmu.double_speed ? (uint8_t)(cycles >> 1) : cycles;
             gbc_mmu_step_dma(gbc, cycles);
             gbc_mmu_step_serial(gbc, cycles);
