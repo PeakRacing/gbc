@@ -158,8 +158,67 @@ GBC_INLINE uint8_t gbc_ppu_tile_pixel(gbc_t *gbc, uint16_t tile_addr, uint8_t x,
     return (uint8_t)(((lo >> bit) & 1) | (((hi >> bit) & 1) << 1));
 }
 
+#if (GBC_ENABLE_FAST_RUN == 1)
+static uint8_t gbc_ppu_fast_bg(gbc_t *gbc, uint8_t ly, uint8_t cgb)
+{
+    gbc_fast_t *fast = gbc->fast;
+    gbc_ppu_t *ppu = &gbc->ppu;
+    const uint8_t *io = fast->io;
+    uint8_t lcdc = io[0x40], wx = io[0x4B];
+    uint8_t use_window = (lcdc & 0x20) && ly >= io[0x4A] && wx <= 166;
+    uint8_t win_used = 0;
+    uint16_t bg_map = (lcdc & 8) ? 0x1C00 : 0x1800;
+    uint16_t win_map = (lcdc & 0x40) ? 0x1C00 : 0x1800;
+    uint8_t x = 0;
+    while (x < GBC_WIDTH) {
+        uint8_t window = use_window && (unsigned)x + 7 >= wx;
+        uint8_t px = window ? (uint8_t)(x + 7 - wx) : (uint8_t)(x + io[0x43]);
+        uint8_t py = window ? ppu->win_line : (uint8_t)(ly + io[0x42]);
+        uint16_t map = window ? win_map : bg_map;
+        uint16_t entry = (uint16_t)(map + (py >> 3) * 32 + (px >> 3));
+        uint8_t tile = gbc->mmu.vram[0][entry];
+        uint8_t attr = cgb ? gbc->mmu.vram[1 % GBC_VRAM_BANKS][entry] : 0;
+        uint8_t bank = (attr >> 3) & 1;
+        uint16_t addr = (lcdc & 0x10) ? (uint16_t)(tile * 16) : (uint16_t)(0x1000 + (int8_t)tile * 16);
+        uint8_t row = (attr & 0x40) ? (uint8_t)(7 - (py & 7)) : (py & 7);
+        uint16_t offset = (uint16_t)(addr + row * 2);
+        const uint8_t *indices;
+        const gbc_color_t *colors = cgb ? fast->bg + (attr & 7) * 4 : fast->dmg[0];
+        uint8_t priority = (attr & 0x80) != 0;
+        uint8_t start = px & 7;
+        uint8_t flip = (attr & 0x20) ? 7 : 0;
+        win_used |= window;
+        /* One fixed row decode, then eight direct index/color stores. */
+        (void)gbc_ppu_tile_pixel(gbc, addr, 0, row, bank);
+        indices = fast->tiles[bank][offset >> 4][(offset >> 1) & 7];
+#if (GBC_ENABLE_BOOT_ROM == 1)
+        gbc_color_t compat[4];
+        if (!cgb && gbc->boot_compat) {
+            for (uint8_t n = 0; n < 4; n++) compat[n] = fast->bg[(io[0x47] >> (n * 2)) & 3];
+            colors = compat;
+        }
+#endif
+#define PIXEL(n) do { uint8_t id = indices[((start + (n)) ^ flip)]; \
+    ppu->bg_color_id[x + (n)] = id; ppu->bg_priority[x + (n)] = priority; \
+    ppu->line[x + (n)] = colors[id]; } while (0)
+        if (!start && x <= GBC_WIDTH - 8 && (window || !use_window || (unsigned)x + 14 < wx)) {
+            PIXEL(0); PIXEL(1); PIXEL(2); PIXEL(3);
+            PIXEL(4); PIXEL(5); PIXEL(6); PIXEL(7);
+            x += 8;
+        } else { PIXEL(0); x++; } /* scroll/window/clipped edge */
+#undef PIXEL
+    }
+    return win_used;
+}
+#endif
+
 static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
 {
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (gbc->fast && gbc->fast->rendering) {
+        return gbc->model == GBC_MODEL_CGB ? gbc_ppu_fast_bg(gbc, ly, 1) : gbc_ppu_fast_bg(gbc, ly, 0);
+    }
+#endif
     gbc_mmu_t *mmu = &gbc->mmu;
     const uint8_t *io = gbc_ppu_line_io(gbc);
     gbc_ppu_t *ppu = &gbc->ppu;
