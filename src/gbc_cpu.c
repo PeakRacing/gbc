@@ -359,7 +359,7 @@ uint8_t gbc_cpu_step(gbc_t *gbc)
         case 0x15: CPU_D(cpu) = cpu_dec8(gbc, CPU_D(cpu)); cycles = 4; break;
         case 0x16: CPU_D(cpu) = cpu_read8(gbc); cycles = 8; break;
         case 0x17: { uint8_t oldc = (CPU_F(cpu) & GBC_FLAG_C) ? 1 : 0; uint8_t c = (CPU_A(cpu) >> 7) & 1; CPU_A(cpu) = (uint8_t)((CPU_A(cpu) << 1) | oldc); cpu_set_flags(gbc, 0, 0, 0, c); cycles = 4; break; }
-        case 0x18: cpu->pc = (uint16_t)(cpu->pc + (int8_t)cpu_read8(gbc)); cycles = 12; break;
+        case 0x18: { int8_t e = (int8_t)cpu_read8(gbc); cpu->pc = (uint16_t)(cpu->pc + e); cycles = 12; break; }
         case 0x19: cpu_add_hl(gbc, cpu->de.w); cycles = 8; break;
         case 0x1A: CPU_A(cpu) = gbc_mmu_read(gbc, cpu->de.w); cycles = 8; break;
         case 0x1B: cpu->de.w--; cycles = 8; break;

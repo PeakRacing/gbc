@@ -1007,8 +1007,23 @@ static void test_failed_load_retains_caller_rom(void)
     expect_u8("failed load clears ownership", gbc.cart.owns_rom, 0);
 }
 
+static void test_jr_fetch_order(void)
+{
+    gbc_t gbc;
+    const int offsets[] = {-128, -2, -1, 0, 1, 127};
+    for (unsigned i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+        gbc_init_static(&gbc); gbc.cpu.pc = 0xC100;
+        gbc_mmu_write(&gbc, 0xC100, 0x18);
+        gbc_mmu_write(&gbc, 0xC101, (uint8_t)offsets[i]);
+        expect_u8("JR cycles", gbc_cpu_step(&gbc), 12);
+        expect_u16("JR post-fetch PC", gbc.cpu.pc, (uint16_t)(0xC102 + offsets[i]));
+        gbc_deinit_static(&gbc);
+    }
+}
+
 int main(void)
 {
+    test_jr_fetch_order();
     test_failed_load_retains_caller_rom();
     test_ei_waits_for_next_instruction();
     test_cgb_obj_palette7_and_oam_priority();
