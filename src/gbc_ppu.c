@@ -4,6 +4,15 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 #include "gbc.h"
+#include "gbc_fast.h"
+
+GBC_INLINE const uint8_t *gbc_ppu_line_io(gbc_t *gbc)
+{
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (gbc->fast && gbc->fast->rendering) return gbc->fast->io;
+#endif
+    return gbc->mmu.io;
+}
 
 static const uint8_t dmg_shades[4][3] = {
     {31, 31, 31},
@@ -40,6 +49,30 @@ GBC_INLINE gbc_color_t gbc_ppu_cgb_color(const uint8_t *palette, uint8_t palette
     uint8_t base = (uint8_t)((palette_id * 8) + (index * 2));
     uint16_t raw = (uint16_t)(palette[base] | (palette[base + 1] << 8));
     return gbc_ppu_color(raw & 0x1F, (raw >> 5) & 0x1F, (raw >> 10) & 0x1F);
+}
+
+GBC_INLINE gbc_color_t gbc_ppu_bg_color(gbc_t *gbc, uint8_t palette, uint8_t index)
+{
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (gbc->fast && gbc->fast->rendering) return gbc->fast->bg[palette * 4 + index];
+#endif
+    return gbc_ppu_cgb_color(gbc->ppu.bg_palette, palette, index);
+}
+
+GBC_INLINE gbc_color_t gbc_ppu_obj_color(gbc_t *gbc, uint8_t palette, uint8_t index)
+{
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (gbc->fast && gbc->fast->rendering) return gbc->fast->obj[palette * 4 + index];
+#endif
+    return gbc_ppu_cgb_color(gbc->ppu.obj_palette, palette, index);
+}
+
+GBC_INLINE gbc_color_t gbc_ppu_gray_color(gbc_t *gbc, uint8_t palette_reg, uint8_t index)
+{
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (gbc->fast && gbc->fast->rendering) return gbc->fast->dmg[palette_reg - 0x47][index];
+#endif
+    return gbc_ppu_dmg_color(gbc->mmu.io[palette_reg], index);
 }
 
 GBC_INLINE uint8_t gbc_ppu_should_draw(gbc_t *gbc)
@@ -101,6 +134,23 @@ GBC_INLINE uint16_t gbc_ppu_mode3_end(gbc_t *gbc, uint8_t ly)
 GBC_INLINE uint8_t gbc_ppu_tile_pixel(gbc_t *gbc, uint16_t tile_addr, uint8_t x, uint8_t y, uint8_t bank)
 {
     uint16_t row = (uint16_t)(tile_addr + (y * 2));
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (gbc->fast && gbc->fast->rendering && row < 0x1800) {
+        uint16_t tile = row >> 4;
+        uint8_t line = (row >> 1) & 7;
+        uint8_t bit = (uint8_t)(1U << line);
+        uint8_t *decoded = gbc->fast->tiles[bank][tile][line];
+        if (gbc->fast->dirty[bank][tile] & bit) {
+            uint8_t lo = gbc->mmu.vram[bank][row], hi = gbc->mmu.vram[bank][row + 1];
+#define DECODE(n) decoded[n] = (uint8_t)(((lo >> (7 - (n))) & 1) | (((hi >> (7 - (n))) & 1) << 1))
+            DECODE(0); DECODE(1); DECODE(2); DECODE(3);
+            DECODE(4); DECODE(5); DECODE(6); DECODE(7);
+#undef DECODE
+            gbc->fast->dirty[bank][tile] &= (uint8_t)~bit;
+        }
+        return decoded[x];
+    }
+#endif
     uint8_t lo = gbc->mmu.vram[bank][row & 0x1FFF];
     uint8_t hi = gbc->mmu.vram[bank][(row + 1) & 0x1FFF];
     uint8_t bit = (uint8_t)(7 - x);
@@ -111,6 +161,7 @@ GBC_INLINE uint8_t gbc_ppu_tile_pixel(gbc_t *gbc, uint16_t tile_addr, uint8_t x,
 static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
 {
     gbc_mmu_t *mmu = &gbc->mmu;
+    const uint8_t *io = gbc_ppu_line_io(gbc);
     gbc_ppu_t *ppu = &gbc->ppu;
     uint8_t *vram0 = mmu->vram[0];
 #if (GBC_ENABLE_CGB == 1)
@@ -119,11 +170,11 @@ static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
     uint8_t *vram1 = mmu->vram[0];
 #endif
     gbc_model_t model = gbc->model;
-    uint8_t lcdc = mmu->io[0x40];
-    uint8_t scy = mmu->io[0x42];
-    uint8_t scx = mmu->io[0x43];
-    uint8_t wy = mmu->io[0x4A];
-    uint8_t wx = mmu->io[0x4B];
+    uint8_t lcdc = io[0x40];
+    uint8_t scy = io[0x42];
+    uint8_t scx = io[0x43];
+    uint8_t wy = io[0x4A];
+    uint8_t wx = io[0x4B];
     /* WX is the window's left edge plus seven.  Values of 167 and above place
      * the edge past the visible area, which the hardware treats as "no
      * window" instead of clamping it to the right edge.  The comparison runs
@@ -184,14 +235,14 @@ static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
         ppu->bg_color_id[x] = color_id;
         ppu->bg_priority[x] = (model == GBC_MODEL_CGB && (attr & 0x80)) ? 1 : 0;
         if (model == GBC_MODEL_CGB) {
-            ppu->line[x] = gbc_ppu_cgb_color(ppu->bg_palette, attr & 0x07, color_id);
+            ppu->line[x] = gbc_ppu_bg_color(gbc, attr & 0x07, color_id);
         } else {
 #if (GBC_ENABLE_BOOT_ROM == 1)
             if (gbc->boot_compat) {
-                ppu->line[x] = gbc_ppu_cgb_color(ppu->bg_palette, 0, (mmu->io[0x47] >> (color_id * 2)) & 3);
+                ppu->line[x] = gbc_ppu_bg_color(gbc, 0, (io[0x47] >> (color_id * 2)) & 3);
             } else
 #endif
-            { ppu->line[x] = gbc_ppu_dmg_color(mmu->io[0x47], color_id); }
+            { ppu->line[x] = gbc_ppu_gray_color(gbc, 0x47, color_id); }
         }
     }
     return win_used;
@@ -200,10 +251,14 @@ static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
 static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
 {
     gbc_mmu_t *mmu = &gbc->mmu;
+    const uint8_t *io = gbc_ppu_line_io(gbc);
     gbc_ppu_t *ppu = &gbc->ppu;
     uint8_t *oam_data = mmu->oam;
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (gbc->fast && gbc->fast->rendering) oam_data = gbc->fast->oam;
+#endif
     gbc_model_t model = gbc->model;
-    uint8_t lcdc = mmu->io[0x40];
+    uint8_t lcdc = io[0x40];
     uint8_t sprite_height = (lcdc & 0x04) ? 16 : 8;
     uint8_t bg_priority_enabled = !(model == GBC_MODEL_CGB && ((lcdc & 0x01) == 0));
     uint8_t sprites[10];
@@ -280,15 +335,15 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
                 continue;
             }
             if (model == GBC_MODEL_CGB) {
-                ppu->line[screen_x] = gbc_ppu_cgb_color(ppu->obj_palette, attr & 0x07, color_id);
+                ppu->line[screen_x] = gbc_ppu_obj_color(gbc, attr & 0x07, color_id);
             } else {
-                uint8_t palette = (attr & 0x10) ? mmu->io[0x49] : mmu->io[0x48];
 #if (GBC_ENABLE_BOOT_ROM == 1)
+                uint8_t palette = (attr & 0x10) ? io[0x49] : io[0x48];
                 if (gbc->boot_compat) {
-                    ppu->line[screen_x] = gbc_ppu_cgb_color(ppu->obj_palette, (attr & 0x10) ? 1 : 0, (palette >> (color_id * 2)) & 3);
+                    ppu->line[screen_x] = gbc_ppu_obj_color(gbc, (attr & 0x10) ? 1 : 0, (palette >> (color_id * 2)) & 3);
                 } else
 #endif
-                { ppu->line[screen_x] = gbc_ppu_dmg_color(palette, color_id); }
+                { ppu->line[screen_x] = gbc_ppu_gray_color(gbc, (attr & 0x10) ? 0x49 : 0x48, color_id); }
             }
         }
     }
@@ -327,16 +382,17 @@ void gbc_ppu_update_lyc(gbc_t *gbc)
 
 void gbc_ppu_render_scanline(gbc_t *gbc, uint8_t ly)
 {
+    const uint8_t *io = gbc_ppu_line_io(gbc);
     gbc_color_t white = gbc_ppu_dmg_color(0xFC, 0);
 
-    if ((gbc->mmu.io[0x40] & 0x80) == 0) {
+    if ((io[0x40] & 0x80) == 0) {
         for (uint8_t x = 0; x < GBC_WIDTH; x++) {
             gbc->ppu.line[x] = white;
             gbc->ppu.bg_color_id[x] = 0;
             gbc->ppu.bg_priority[x] = 0;
             gbc->ppu.obj_drawn[x] = 0;
         }
-    } else if ((gbc->mmu.io[0x40] & 0x01) || gbc->model == GBC_MODEL_CGB) {
+    } else if ((io[0x40] & 0x01) || gbc->model == GBC_MODEL_CGB) {
         gbc_memset(gbc->ppu.obj_drawn, 0, sizeof(gbc->ppu.obj_drawn));
         if (gbc_ppu_render_bg_window(gbc, ly)) {
             gbc->ppu.win_line++;
@@ -426,4 +482,81 @@ void gbc_ppu_step(gbc_t *gbc, uint8_t cycles)
     }
     /* VBlank mode (1) is already set inside the while loop when ly becomes 144. */
 }
+
+#if (GBC_ENABLE_FAST_RUN == 1)
+static void gbc_ppu_fast_latch(gbc_t *gbc)
+{
+    gbc_fast_t *fast = gbc->fast;
+    /* Selection and rendering consume this Mode-2-end OAM snapshot. */
+    gbc_memcpy(fast->oam, gbc->mmu.oam, sizeof(fast->oam));
+    gbc_memcpy(fast->io, gbc->mmu.io, sizeof(fast->io));
+    gbc_memcpy(fast->bg, fast->live_bg, sizeof(fast->bg));
+    gbc_memcpy(fast->obj, fast->live_obj, sizeof(fast->obj));
+    for (uint8_t p = 0; p < 3; p++) {
+        for (uint8_t c = 0; c < 4; c++) {
+            fast->dmg[p][c] = gbc_ppu_dmg_color(fast->io[0x47 + p], c);
+        }
+    }
+    fast->latched = 1;
+    fast->mode3_end = gbc_ppu_mode3_end(gbc, gbc->mmu.io[0x44]);
+}
+
+void gbc_ppu_fast_step(gbc_t *gbc, uint8_t cycles)
+{
+    gbc_fast_t *fast = gbc->fast;
+    gbc_ppu_t *ppu = &gbc->ppu;
+    if (!(gbc->mmu.io[0x40] & 0x80)) {
+        ppu->dot_cycles = 0;
+        gbc->mmu.io[0x44] = 0;
+        if (ppu->mode != 0) gbc_ppu_set_mode(gbc, 0);
+        fast->next_dot = 0; fast->latched = 0;
+        return;
+    }
+    /* Rebuild after reset/state load, including a state in the middle of a line.
+     * The remainder of that line uses the restored register values. */
+    if (!fast->next_dot) {
+        uint8_t ly = gbc->mmu.io[0x44];
+        if (ly >= 144) { fast->next_dot = 456; gbc_ppu_set_mode(gbc, 1); }
+        else if (ppu->dot_cycles < 80) { fast->next_dot = 80; gbc_ppu_set_mode(gbc, 2); }
+        else {
+            gbc_ppu_fast_latch(gbc);
+            if (ppu->dot_cycles < fast->mode3_end) {
+                fast->next_dot = fast->mode3_end; gbc_ppu_set_mode(gbc, 3);
+            } else { fast->next_dot = 456; gbc_ppu_set_mode(gbc, 0); }
+        }
+    }
+    ppu->dot_cycles = (uint16_t)(ppu->dot_cycles + cycles);
+    if (ppu->dot_cycles < fast->next_dot) return;
+    do {
+        uint8_t ly = gbc->mmu.io[0x44];
+        if (fast->next_dot == 80) {
+            gbc_ppu_fast_latch(gbc);
+            gbc_ppu_set_mode(gbc, 3);
+            fast->next_dot = fast->mode3_end;
+        } else if (fast->next_dot < 456) {
+            fast->rendering = 1;
+            gbc_ppu_render_scanline(gbc, ly);
+            fast->rendering = 0;
+            gbc_ppu_set_mode(gbc, 0); /* HBlank DMA remains an event. */
+            fast->next_dot = 456;
+        } else {
+            ppu->dot_cycles -= 456;
+            ly++;
+            if (ly > 153) { ly = 0; ppu->win_line = 0; }
+            gbc->mmu.io[0x44] = ly;
+            gbc_ppu_update_lyc(gbc);
+            fast->latched = 0;
+            if (ly == 144) {
+                gbc_mmu_request_interrupt(gbc, GBC_IF_VBLANK);
+                gbc_ppu_set_mode(gbc, 1);
+#if (GBC_FRAMEBUFFER_ENABLE == 1) && (GBC_RAM_LACK == 0)
+                if (gbc_ppu_should_draw(gbc)) gbc_draw(0, 0, GBC_WIDTH - 1, GBC_HEIGHT - 1, gbc->gbc_draw_data);
+#endif
+                ppu->frame_ready = 1;
+            } else if (ly < 144) gbc_ppu_set_mode(gbc, 2);
+            fast->next_dot = ly < 144 ? 80 : 456;
+        }
+    } while (ppu->dot_cycles >= fast->next_dot);
+}
+#endif
 

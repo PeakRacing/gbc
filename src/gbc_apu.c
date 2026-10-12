@@ -4,6 +4,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 #include "gbc.h"
+#include "gbc_fast.h"
 
 #if (GBC_ENABLE_SOUND == 1)
 
@@ -451,6 +452,9 @@ void gbc_apu_reset(gbc_t *gbc)
 
 uint8_t gbc_apu_read(gbc_t *gbc, uint8_t reg)
 {
+#if (GBC_ENABLE_FAST_RUN == 1)
+    gbc_fast_flush_audio(gbc);
+#endif
 #if (GBC_ENABLE_SOUND == 1)
     if (reg == 0x26) {
         gbc_apu_sync_nr52(gbc);
@@ -461,6 +465,10 @@ uint8_t gbc_apu_read(gbc_t *gbc, uint8_t reg)
 
 void gbc_apu_write(gbc_t *gbc, uint8_t reg, uint8_t data)
 {
+#if (GBC_ENABLE_FAST_RUN == 1)
+    /* Retire preceding time before trigger/NR52/wave RAM changes. */
+    gbc_fast_flush_audio(gbc);
+#endif
 #if (GBC_ENABLE_SOUND == 1)
     gbc_apu_t *apu = &gbc->apu;
 

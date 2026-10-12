@@ -24,8 +24,16 @@
 #define GBC_NAME                    "GBC"
 #define GBC_URL                     "https://github.com/PeakRacing/gbc"
 
+typedef enum { GBC_RUN_REFERENCE = 0, GBC_RUN_FAST = 1 } gbc_run_mode_t;
+struct gbc_fast;
+
 typedef struct gbc {
     uint8_t gbc_quit;
+    uint8_t running;
+    gbc_run_mode_t run_mode;
+#if (GBC_ENABLE_FAST_RUN == 1)
+    struct gbc_fast *fast;
+#endif
 #if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
     uint8_t state_fault;
 #endif
@@ -65,6 +73,11 @@ void gbc_run(gbc_t *gbc);
 /* Returns CPU clocks consumed. GBC_HALT_BATCH_CYCLES > 4 permits bounded
  * idle HALT aggregation; peripheral and PCM stepping retains 4-clock granularity. */
 uint8_t gbc_step(gbc_t *gbc);
+/* Switch only between calls, never from a running callback. FAST allocation
+ * failure leaves the current mode unchanged. Contexts are not thread-safe. */
+int gbc_set_run_mode(gbc_t *gbc, gbc_run_mode_t mode);
+/* Executes whole instructions; returns actual clocks including overshoot. */
+uint32_t gbc_run_cycles(gbc_t *gbc, uint32_t budget);
 int gbc_set_model(gbc_t *gbc, gbc_model_t model);
 #if (GBC_ENABLE_BOOT_ROM == 1)
 /* Bind before loading a cartridge. NULL/0 detaches. Borrowed immutable storage. */

@@ -4,6 +4,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 #include "gbc_storage.h"
+#include "gbc_fast.h"
 #if (GBC_ENABLE_SAVE_STATE == 1) && (GBC_USE_FS == 1)
 
 typedef struct {
@@ -416,6 +417,9 @@ int gbc_state_save_file(gbc_t *gbc, const char *path)
     uint8_t header[48], footer[4];
     if (!gbc || !path || !gbc->cart.rom_data) { return GBC_ERROR; }
     if (gbc->state_fault) { return GBC_ERROR_FORMAT; }
+#if (GBC_ENABLE_FAST_RUN == 1)
+    gbc_fast_flush_audio(gbc);
+#endif
     int ret = gbc_storage_path(temp, path, ".tmp");
     if (ret == GBC_OK) { ret = gbc_state_header(gbc, header); }
     if (ret != GBC_OK) { return ret; }
@@ -490,6 +494,9 @@ int gbc_state_load_file(gbc_t *gbc, const char *path)
 #endif
         gbc->gbc_quit = 0; gbc->last_frame_ticks = 0;
         gbc_cart_rebuild_mapping(gbc);
+#if (GBC_ENABLE_FAST_RUN == 1)
+        gbc_fast_rebuild(gbc);
+#endif
         gbc_state_loaded(gbc);
     }
     return ret;

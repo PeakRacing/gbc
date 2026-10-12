@@ -4,6 +4,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 #include "gbc.h"
+#include "gbc_fast.h"
 
 static void gbc_reset(gbc_t *gbc)
 {
@@ -26,6 +27,9 @@ static void gbc_reset(gbc_t *gbc)
     gbc_cpu_reset(gbc);
 #if (GBC_ENABLE_BOOT_ROM == 1)
     gbc_boot_reset(gbc);
+#endif
+#if (GBC_ENABLE_FAST_RUN == 1)
+    gbc_fast_rebuild(gbc);
 #endif
 }
 
@@ -69,7 +73,11 @@ int gbc_deinit_static(gbc_t *gbc)
     if (ret != GBC_OK) {
         return ret;
     }
-    return gbc_deinitex(gbc);
+    ret = gbc_deinitex(gbc);
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (gbc->fast) { gbc_free(gbc->fast); gbc->fast = NULL; }
+#endif
+    return ret;
 }
 
 int gbc_deinit(gbc_t *gbc)
@@ -175,6 +183,11 @@ uint8_t gbc_step(gbc_t *gbc)
     if (gbc == NULL || gbc->gbc_quit || gbc->cart.rom_data == NULL) {
         return 0;
     }
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (gbc->run_mode == GBC_RUN_FAST) return (uint8_t)gbc_run_cycles(gbc, 1);
+#endif
+    if (gbc->running) return 0;
+    gbc->running = 1;
 #if (GBC_HALT_BATCH_CYCLES > 4)
     do {
         if (total != 0) {
@@ -219,6 +232,7 @@ uint8_t gbc_step(gbc_t *gbc)
 #endif
         gbc_frame(gbc);
     }
+    gbc->running = 0;
 #if (GBC_HALT_BATCH_CYCLES > 4)
     return total;
 #else
@@ -268,7 +282,7 @@ void gbc_run(gbc_t *gbc)
         return;
     }
     while (!gbc->gbc_quit) {
-        gbc_step(gbc);
+        if (!gbc_run_cycles(gbc, 512)) break;
     }
 }
 

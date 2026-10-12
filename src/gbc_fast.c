@@ -1,0 +1,104 @@
+/* Copyright PeakRacing; SPDX-License-Identifier: Apache-2.0 */
+#include "gbc_fast.h"
+
+int gbc_set_run_mode(gbc_t *gbc, gbc_run_mode_t mode)
+{
+    if (!gbc) return GBC_ERROR;
+    if (gbc->running || (mode != GBC_RUN_REFERENCE && mode != GBC_RUN_FAST)) return GBC_ERROR_UNSUPPORTED;
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (mode == GBC_RUN_FAST && !gbc->fast) {
+        gbc_fast_t *fast = (gbc_fast_t *)gbc_malloc(sizeof(*fast));
+        if (!fast) return GBC_ERROR_ALLOC;
+        gbc_memset(fast, 0, sizeof(*fast));
+        gbc->fast = fast;
+        gbc_fast_rebuild(gbc);
+    } else if (mode == GBC_RUN_REFERENCE && gbc->fast) {
+        gbc_fast_flush_audio(gbc);
+        gbc_free(gbc->fast);
+        gbc->fast = NULL;
+    }
+#else
+    if (mode == GBC_RUN_FAST) return GBC_ERROR_UNSUPPORTED;
+#endif
+    gbc->run_mode = mode;
+    return GBC_OK;
+}
+
+#if (GBC_ENABLE_FAST_RUN == 1)
+void gbc_fast_palette_write(gbc_t *gbc, uint8_t object, uint8_t byte)
+{
+    if (!gbc->fast) return;
+    uint8_t index = byte >> 1;
+    const uint8_t *palette = object ? gbc->ppu.obj_palette : gbc->ppu.bg_palette;
+    uint16_t raw = (uint16_t)(palette[index * 2] | (palette[index * 2 + 1] << 8));
+    gbc_color_t *cache = object ? gbc->fast->live_obj : gbc->fast->live_bg;
+    cache[index] = gbc_ppu_color(raw & 31, (raw >> 5) & 31, (raw >> 10) & 31);
+}
+
+void gbc_fast_rebuild(gbc_t *gbc)
+{
+    if (!gbc->fast) return;
+    gbc_fast_t *fast = gbc->fast;
+    gbc_memset(fast->dirty, 0xFF, sizeof(fast->dirty));
+    fast->latched = fast->rendering = 0;
+    fast->next_dot = 0;
+    fast->apu_pending = 0;
+    for (uint8_t i = 0; i < 64; i += 2) {
+        gbc_fast_palette_write(gbc, 0, i);
+        gbc_fast_palette_write(gbc, 1, i);
+    }
+}
+
+void gbc_fast_flush_audio(gbc_t *gbc)
+{
+    if (!gbc->fast) return;
+    uint32_t cycles = gbc->fast->apu_pending;
+    gbc->fast->apu_pending = 0;
+    while (cycles) {
+        uint8_t part = cycles > 255 ? 255 : (uint8_t)cycles;
+        gbc_apu_step(gbc, part);
+        cycles -= part;
+    }
+}
+#endif
+
+uint32_t gbc_run_cycles(gbc_t *gbc, uint32_t budget)
+{
+    uint32_t total = 0;
+    if (!gbc || !budget || gbc->gbc_quit || !gbc->cart.rom_data || gbc->running) return 0;
+#if (GBC_ENABLE_FAST_RUN == 1)
+    if (gbc->run_mode == GBC_RUN_FAST) {
+        gbc->running = 1;
+        do {
+            uint8_t cycles = gbc_cpu_step(gbc);
+            uint8_t dots = gbc->mmu.double_speed ? (uint8_t)(cycles >> 1) : cycles;
+            gbc_mmu_step_dma(gbc, cycles);
+            gbc_mmu_step_serial(gbc, cycles);
+            gbc_timer_step(gbc, cycles);
+            gbc_ppu_fast_step(gbc, dots);
+            gbc->fast->apu_pending += dots;
+            /* Bound audio/control latency even with the LCD disabled. */
+            if (gbc->fast->apu_pending >= 128) gbc_fast_flush_audio(gbc);
+            total += cycles;
+            if (gbc->ppu.frame_ready) {
+                gbc->ppu.frame_ready = 0;
+                gbc->frame_count++;
+#if (GBC_FRAME_SKIP != 0)
+                if (gbc->gbc_frame_skip_count >= GBC_FRAME_SKIP) gbc->gbc_frame_skip_count = 0;
+                else gbc->gbc_frame_skip_count++;
+#endif
+                gbc_frame(gbc);
+            }
+        } while (!gbc->gbc_quit && total < budget);
+        gbc_fast_flush_audio(gbc);
+        gbc->running = 0;
+        return total;
+    }
+#endif
+    do {
+        uint8_t cycles = gbc_step(gbc);
+        if (!cycles) break;
+        total += cycles;
+    } while (!gbc->gbc_quit && total < budget);
+    return total;
+}

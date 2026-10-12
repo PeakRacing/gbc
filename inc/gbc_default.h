@@ -41,6 +41,11 @@
 #define GBC_ENABLE_SOUND            (0)
 #endif
 
+/* Optional speed-oriented scanline/sample event path. Reference is default. */
+#ifndef GBC_ENABLE_FAST_RUN
+#define GBC_ENABLE_FAST_RUN (0)
+#endif
+
 #ifndef GBC_ENABLE_DMG
 #define GBC_ENABLE_DMG              (1)
 #endif

@@ -4,6 +4,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 #include "gbc.h"
+#include "gbc_fast.h"
 
 static uint8_t gbc_mmu_read_io(gbc_t *gbc, uint8_t reg)
 {
@@ -85,6 +86,9 @@ static uint16_t gbc_mmu_hdma_dst_from_regs(gbc_t *gbc)
 static void gbc_mmu_hdma_copy_block(gbc_t *gbc)
 {
     for (uint8_t i = 0; i < 16; i++) {
+#if (GBC_ENABLE_FAST_RUN == 1)
+        gbc_fast_vram_dirty(gbc, gbc->mmu.vram_bank, (uint16_t)(gbc->mmu.hdma_dst + i));
+#endif
         gbc->mmu.vram[gbc->mmu.vram_bank][(gbc->mmu.hdma_dst + i) & 0x1FFF] =
             gbc_mmu_read(gbc, (uint16_t)(gbc->mmu.hdma_src + i));
     }
@@ -199,6 +203,9 @@ static void gbc_mmu_write_io(gbc_t *gbc, uint8_t reg, uint8_t data)
         return;
     case 0x69:
         gbc->ppu.bg_palette[gbc->ppu.bgpi & 0x3F] = data;
+#if (GBC_ENABLE_FAST_RUN == 1)
+        gbc_fast_palette_write(gbc, 0, gbc->ppu.bgpi & 0x3F);
+#endif
         if (gbc->ppu.bgpi & 0x80) {
             gbc->ppu.bgpi = (uint8_t)(0x80 | ((gbc->ppu.bgpi + 1) & 0x3F));
         }
@@ -208,6 +215,9 @@ static void gbc_mmu_write_io(gbc_t *gbc, uint8_t reg, uint8_t data)
         return;
     case 0x6B:
         gbc->ppu.obj_palette[gbc->ppu.obpi & 0x3F] = data;
+#if (GBC_ENABLE_FAST_RUN == 1)
+        gbc_fast_palette_write(gbc, 1, gbc->ppu.obpi & 0x3F);
+#endif
         if (gbc->ppu.obpi & 0x80) {
             gbc->ppu.obpi = (uint8_t)(0x80 | ((gbc->ppu.obpi + 1) & 0x3F));
         }
@@ -369,6 +379,9 @@ void gbc_mmu_write(gbc_t *gbc, uint16_t addr, uint8_t data)
     }
     if (addr < 0xA000) {
         gbc->mmu.vram[gbc->mmu.vram_bank][addr - 0x8000] = data;
+#if (GBC_ENABLE_FAST_RUN == 1)
+        gbc_fast_vram_dirty(gbc, gbc->mmu.vram_bank, addr);
+#endif
         return;
     }
     if (addr < 0xC000) {
