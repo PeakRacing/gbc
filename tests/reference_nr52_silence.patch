@@ -1,0 +1,40 @@
+--- a/src/gbc_apu.c
++++ b/src/gbc_apu.c
+@@ -386,10 +386,10 @@
+     gbc_apu_t *apu = &gbc->apu;
+     uint8_t nr50 = gbc->mmu.io[0x24];
+     uint8_t nr51 = gbc->mmu.io[0x25];
+-    int16_t ch1 = gbc_apu_square_sample(&apu->square1);
+-    int16_t ch2 = gbc_apu_square_sample(&apu->square2);
+-    int16_t ch3 = gbc_apu_wave_sample(gbc);
+-    int16_t ch4 = gbc_apu_noise_sample(&apu->noise);
++    int16_t ch1 = apu->enabled ? gbc_apu_square_sample(&apu->square1) : 0;
++    int16_t ch2 = apu->enabled ? gbc_apu_square_sample(&apu->square2) : 0;
++    int16_t ch3 = apu->enabled ? gbc_apu_wave_sample(gbc) : 0;
++    int16_t ch4 = apu->enabled ? gbc_apu_noise_sample(&apu->noise) : 0;
+     int16_t left = 0;
+     int16_t right = 0;
+     int32_t mixed_left;
+@@ -599,14 +599,14 @@
+ #if (GBC_ENABLE_SOUND == 1)
+     gbc_apu_t *apu = &gbc->apu;
+ 
+-    if (!apu->enabled) {
+-        return;
+-    }
+-    gbc_apu_clock_frame_sequencer(gbc, cycles);
+-    gbc_apu_clock_square(&apu->square1, cycles);
+-    gbc_apu_clock_square(&apu->square2, cycles);
+-    gbc_apu_clock_wave(&apu->wave, cycles);
+-    gbc_apu_clock_noise(&apu->noise, cycles);
++    /* Keep PCM time advancing with NR52 off; do not clock disabled channels. */
++    if (apu->enabled) {
++        gbc_apu_clock_frame_sequencer(gbc, cycles);
++        gbc_apu_clock_square(&apu->square1, cycles);
++        gbc_apu_clock_square(&apu->square2, cycles);
++        gbc_apu_clock_wave(&apu->wave, cycles);
++        gbc_apu_clock_noise(&apu->noise, cycles);
++    }
+ 
+     apu->sample_acc += (uint32_t)cycles * GBC_APU_SAMPLE_RATE;
+     while (apu->sample_acc >= GBC_CPU_CLOCK_FREQ) {

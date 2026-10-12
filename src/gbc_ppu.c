@@ -415,7 +415,9 @@ void gbc_ppu_step(gbc_t *gbc, uint8_t cycles)
         uint8_t mode;
         if (gbc->ppu.dot_cycles < 80) {
             mode = 2;
-        } else if (gbc->ppu.dot_cycles < gbc_ppu_mode3_end(gbc, ly)) {
+        } else if (gbc->ppu.dot_cycles < 252 ||
+                   (gbc->ppu.dot_cycles < 289 &&
+                    gbc->ppu.dot_cycles < gbc_ppu_mode3_end(gbc, ly))) {
             mode = 3;
         } else {
             mode = 0;

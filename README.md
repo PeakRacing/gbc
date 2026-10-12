@@ -163,3 +163,16 @@ Run `xmake build low_memory_test && xmake run low_memory_test` in `sdl/sdl2` to
 verify RGB565, scanline output, DMG bank bounds, borrowed ROM lifetime and zero
 context/cartridge/hot-path allocations with filesystem, audio and SRAM disabled.
 This host test does not establish MCU frame rate or stack requirements.
+
+
+### Core performance regressions
+
+The JR operand fetch fix and exact timer/PPU/APU fast paths were reviewed and
+transferred from the F1C200S port. `python tests/performance_regression.py`
+compares against immutable commit `8619557`: all DIV/TAC values, scanline mode
+boundaries with dynamic OAM, and two million APU steps including every PCM byte.
+It requires that Git history and GCC are available; use `--cc` to select GCC.
+Sound-enabled builds now emit silent PCM at the configured cadence with NR52
+off while channel clocks remain frozen. No new configuration or save format is
+introduced. Board-only scaling, profiling hooks and compiler LTO flags stay in
+the firmware repository. See [review and measured limits](docs/performance_review.md).

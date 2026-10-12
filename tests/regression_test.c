@@ -1021,8 +1021,21 @@ static void test_jr_fetch_order(void)
     }
 }
 
+static void test_timer_zero_cycles_is_noop(void)
+{
+    gbc_t gbc;
+    gbc_init_static(&gbc); gbc.timer.div_counter = 0x1234;
+    gbc.timer.tima_reload_delay = 3; gbc.mmu.io[4] = 0x9A;
+    gbc_timer_step(&gbc, 0);
+    expect_u8("zero clocks preserve DIV mirror", gbc.mmu.io[4], 0x9A);
+    expect_u16("zero clocks preserve divider", gbc.timer.div_counter, 0x1234);
+    expect_u8("zero clocks preserve reload", gbc.timer.tima_reload_delay, 3);
+    gbc_deinit_static(&gbc);
+}
+
 int main(void)
 {
+    test_timer_zero_cycles_is_noop();
     test_jr_fetch_order();
     test_failed_load_retains_caller_rom();
     test_ei_waits_for_next_instruction();

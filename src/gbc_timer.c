@@ -72,17 +72,22 @@ void gbc_timer_write_tac(gbc_t *gbc, uint8_t data)
 
 void gbc_timer_step(gbc_t *gbc, uint8_t cycles)
 {
+    if (cycles == 0) return;
     uint8_t tac = gbc->mmu.io[0x07];
 
     gbc_timer_advance_reload(gbc, cycles);
 
-    while (cycles-- != 0) {
-        uint8_t old_input = gbc_timer_input(gbc, tac);
-        gbc->timer.div_counter++;
-        gbc->mmu.io[0x04] = (uint8_t)(gbc->timer.div_counter >> 8);
-        if (old_input && !gbc_timer_input(gbc, tac)) {
-            gbc_timer_increment_tima(gbc);
-        }
+    /* No CPU/MMIO access interleaves these clocks. Count falling edges of
+     * the selected DIV bit instead of executing one loop per clock. Keep
+     * reload advancement at the instruction boundary, as in the reference. */
+    if (tac & 0x04) {
+        static const uint8_t shifts[4] = {10, 4, 6, 8};
+        uint8_t shift = shifts[tac & 3];
+        uint32_t before = gbc->timer.div_counter;
+        unsigned edges = ((before + cycles) >> shift) - (before >> shift);
+        while (edges-- != 0) gbc_timer_increment_tima(gbc);
     }
+    gbc->timer.div_counter = (uint16_t)(gbc->timer.div_counter + cycles);
+    gbc->mmu.io[0x04] = (uint8_t)(gbc->timer.div_counter >> 8);
 }
 
