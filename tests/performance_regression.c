@@ -4,6 +4,7 @@
 #undef main
 void reference_timer_step(gbc_t *, uint8_t);
 void reference_ppu_step(gbc_t *, uint8_t);
+void reference_ppu_render_scanline(gbc_t *, uint8_t);
 static uint32_t random_state = 0x193ab45;
 static uint32_t next_random(void)
 {
@@ -52,5 +53,29 @@ int main(void)
                 cases++;
             }
     printf("PPU differential PASS cases=%u (all LY/dots, dynamic OAM/SCX/LCDC/STAT)\n", cases);
+    for (unsigned i = 0; i < 20000; i++) {
+        a.model = (next_random() & 1) ? GBC_MODEL_DMG : GBC_MODEL_CGB;
+        for (unsigned bank = 0; bank < GBC_VRAM_BANKS; bank++)
+            for (unsigned j = 0; j < 0x2000; j++) a.mmu.vram[bank][j] = (uint8_t)next_random();
+        for (unsigned j = 0; j < sizeof(a.mmu.oam); j++) a.mmu.oam[j] = (uint8_t)next_random();
+        for (unsigned j = 0x40; j <= 0x4B; j++) a.mmu.io[j] = (uint8_t)next_random();
+        for (unsigned j = 0; j < 64; j++) {
+            a.ppu.bg_palette[j] = (uint8_t)next_random(); a.ppu.obj_palette[j] = (uint8_t)next_random();
+        }
+        a.ppu.win_line = (uint8_t)next_random();
+#if GBC_ENABLE_BOOT_ROM
+        a.boot_compat = next_random() & 1; a.hardware_model = GBC_MODEL_CGB;
+        a.boot_opri = next_random() & 1;
+#endif
+        /* Cycle through every WX value, including 0..6, 166 and off-screen. */
+        a.mmu.io[0x4B] = (uint8_t)i;
+        memcpy(&b, &a, sizeof(a));
+        uint8_t ly = (uint8_t)(next_random() % 144);
+        gbc_ppu_render_scanline(&a, ly); reference_ppu_render_scanline(&b, ly);
+        if (memcmp(&a, &b, sizeof(a))) {
+            printf("render mismatch case=%u WX=%u LY=%u model=%u\n",i,a.mmu.io[0x4B],ly,a.model); return 1;
+        }
+    }
+    puts("PPU render differential PASS 20000 random VRAM/OAM/palette/scroll/window scenes");
     return 0;
 }
