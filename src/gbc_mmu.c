@@ -11,6 +11,11 @@ static uint8_t gbc_mmu_read_io(gbc_t *gbc, uint8_t reg)
         return gbc_apu_read(gbc, reg);
     }
 
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    if (reg == 0x50) { return gbc->boot_active ? 0 : 0xFF; }
+    if (reg == 0x4C) { return gbc->hardware_model == GBC_MODEL_CGB ? gbc->boot_key0 : 0xFF; }
+    if (reg == 0x6C) { return gbc->hardware_model == GBC_MODEL_CGB ? (uint8_t)(0xFE | gbc->boot_opri) : 0xFF; }
+#endif
     switch (reg) {
     case 0x00:
         return gbc_joypad_read(gbc);
@@ -134,6 +139,18 @@ static void gbc_mmu_write_io(gbc_t *gbc, uint8_t reg, uint8_t data)
         return;
     }
 
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    if (reg == 0x50) { if (data && gbc->boot_active) { gbc_boot_unmap(gbc); } return; }
+    if (reg == 0x4C || reg == 0x6C) {
+        if (gbc->boot_active && gbc->hardware_model == GBC_MODEL_CGB) {
+            if (reg == 0x4C) { gbc->boot_key0 = data; }
+            else { gbc->boot_opri = data & 1; }
+        }
+        return;
+    }
+    /* Compatibility palettes are programmed by the boot ROM then locked. */
+    if (gbc->boot_compat && reg >= 0x68 && reg <= 0x6B) { return; }
+#endif
     switch (reg) {
     case 0x00:
         gbc_joypad_write(gbc, data);
@@ -248,9 +265,10 @@ void gbc_mmu_reset(gbc_t *gbc)
     gbc->mmu.serial_cycles = 0;
 
     gbc->mmu.io[0x00] = 0xCF;
+    gbc->mmu.io[0x02] = 0x7E; /* post-boot SC unused bits */
     gbc->mmu.io[0x05] = 0x00;
     gbc->mmu.io[0x06] = 0x00;
-    gbc->mmu.io[0x07] = 0x00;
+    gbc->mmu.io[0x07] = 0xF8; /* post-boot TAC unused bits */
     gbc->mmu.io[0x0F] = 0xE1;
     gbc->mmu.io[0x40] = 0x91;
     gbc->mmu.io[0x41] = 0x85;
@@ -264,6 +282,10 @@ void gbc_mmu_reset(gbc_t *gbc)
     gbc->mmu.io[0x4A] = 0x00;
     gbc->mmu.io[0x4B] = 0x00;
     gbc->mmu.io[0x4F] = 0xFE;
+    gbc->mmu.io[0x51] = 0xFF;
+    gbc->mmu.io[0x52] = 0xFF;
+    gbc->mmu.io[0x53] = 0xFF;
+    gbc->mmu.io[0x54] = 0xFF;
     gbc->mmu.io[0x55] = 0xFF;  /* HDMA5: no active transfer */
     gbc->mmu.io[0x70] = 0xF9;
 
@@ -297,6 +319,13 @@ uint8_t gbc_mmu_read(gbc_t *gbc, uint16_t addr)
         return 0xFF;
     }
     if (addr < 0x8000) {
+#if (GBC_ENABLE_BOOT_ROM == 1)
+        if (gbc->boot_active && (addr < 0x100 ||
+            (gbc->hardware_model == GBC_MODEL_CGB && addr >= 0x200 && addr < 0x900))) {
+            uint16_t offset = (gbc->boot_size == 2048 && addr >= 0x200) ? (uint16_t)(addr - 0x100) : addr;
+            return gbc->boot_rom[offset];
+        }
+#endif
         return gbc_cart_read_rom(gbc, addr);
     }
     if (addr < 0xA000) {

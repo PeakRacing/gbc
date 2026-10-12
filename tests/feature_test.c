@@ -166,6 +166,30 @@ static void feature_setup(uint8_t type)
     gbc_cart_write(&feature_gbc, 0, 0x0A);
 }
 
+static void feature_file_battery(void)
+{
+    const char *path = "feature_cart.gb";
+    gbc_unload_rom_discard(&feature_gbc);
+    CHECK(gbc_init_static(&feature_gbc) == GBC_OK);
+    memset(feature_rom, 0, sizeof(feature_rom));
+    feature_rom[0x147] = 3; feature_rom[0x149] = 2;
+    FILE *fp = fopen(path, "wb"); CHECK(fp != NULL);
+    if (fp) { CHECK(fwrite(feature_rom, 1, sizeof(feature_rom), fp) == sizeof(feature_rom)); fclose(fp); }
+    remove("feature_cart.gb.sav");
+    CHECK(gbc_load_file(&feature_gbc, path) == GBC_OK);
+    gbc_cart_write(&feature_gbc, 0, 10);
+    gbc_cart_write_ram(&feature_gbc, 0xA123, 0x5A);
+    unsigned allocations = feature_allocations;
+    CHECK(gbc_persist_save(&feature_gbc) == GBC_OK);
+    CHECK(feature_allocations == allocations);
+    CHECK(gbc_unload_rom(&feature_gbc) == GBC_OK);
+    CHECK(gbc_load_file(&feature_gbc, path) == GBC_OK);
+    gbc_cart_write(&feature_gbc, 0, 10);
+    CHECK(gbc_cart_read_ram(&feature_gbc, 0xA123) == 0x5A);
+    CHECK(gbc_deinit_static(&feature_gbc) == GBC_OK);
+    remove(path); remove("feature_cart.gb.sav");
+}
+
 static void feature_battery(void)
 {
     remove("feature_test.sav");
@@ -279,6 +303,25 @@ static void feature_rtc(void)
 }
 
 
+#if (GBC_ENABLE_SAVE_STATE == 1)
+static void feature_change_state_byte(const char *path, long offset, int value)
+{
+    FILE *fp = fopen(path, "r+b"); CHECK(fp != NULL);
+    if (!fp) { return; }
+    fseek(fp, offset, SEEK_SET); fputc(value, fp);
+    fseek(fp, 0, SEEK_END); long length = ftell(fp) - 4;
+    fseek(fp, 0, SEEK_SET);
+    uint32_t crc = 0xFFFFFFFFUL;
+    for (long i = 0; i < length; i++) {
+        crc ^= (uint8_t)fgetc(fp);
+        for (int bit = 0; bit < 8; bit++) { crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320UL : 0); }
+    }
+    crc = ~crc;
+    fseek(fp, length, SEEK_SET);
+    for (int i = 0; i < 4; i++) { fputc((uint8_t)(crc >> (8 * i)), fp); }
+    fclose(fp);
+}
+
 static uint32_t feature_hash(const void *data, size_t size)
 {
     const uint8_t *p = data;
@@ -324,6 +367,12 @@ static void feature_state(void)
     CHECK(pixels == feature_hash(feature_gbc.gbc_draw_data, sizeof(feature_gbc.gbc_draw_data)));
     CHECK(feature_allocations == allocations);
     uint16_t pc = feature_gbc.cpu.pc;
+    uint32_t before_mmu = feature_hash(&feature_gbc.mmu, sizeof(feature_gbc.mmu));
+    /* CRC-valid but illegal IME must be rejected before any state is applied. */
+    feature_change_state_byte("feature_test.state", 68, 2);
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_test.state") == GBC_ERROR_FORMAT);
+    CHECK(feature_gbc.cpu.pc == pc && feature_hash(&feature_gbc.mmu, sizeof(feature_gbc.mmu)) == before_mmu);
+    CHECK(gbc_state_save_file(&feature_gbc, "feature_test.state") == GBC_OK);
     FILE *fp = fopen("feature_test.state", "r+b");
     CHECK(fp != NULL);
     if (fp) { fseek(fp, 8, SEEK_SET); int b = fgetc(fp); fseek(fp, 8, SEEK_SET); fputc(b ^ 1, fp); fclose(fp); }
@@ -349,18 +398,119 @@ static void feature_state(void)
     feature_read_count = 0;
     feature_fault_read = (load_reads - 1) / 2 + 2;
     CHECK(gbc_state_load_file(&feature_gbc, "feature_test.state") == GBC_ERROR_IO);
-    CHECK(feature_gbc.gbc_quit == 1);
+    CHECK(feature_gbc.gbc_quit == 1 && feature_gbc.state_fault == 1);
+    CHECK(gbc_step(&feature_gbc) == 0);
+    CHECK(gbc_persist_save(&feature_gbc) == GBC_ERROR_FORMAT);
     feature_fault_read = 0;
     gbc_unload_rom_discard(&feature_gbc);
     remove("feature_test.state");
     remove("feature_test.sav");
 }
 
+#endif
+
+#if (GBC_ENABLE_BOOT_ROM == 1)
+static void feature_boot(void)
+{
+    static uint8_t dmg[256], cgb[2048], padded[2304];
+    gbc_unload_rom_discard(&feature_gbc);
+    CHECK(gbc_init_static(&feature_gbc) == GBC_OK);
+    CHECK(gbc_boot_set_rom(&feature_gbc, dmg, 255, GBC_MODEL_DMG) == GBC_ERROR_UNSUPPORTED);
+    CHECK(gbc_boot_set_rom(&feature_gbc, dmg, 256, GBC_MODEL_CGB) == GBC_ERROR_UNSUPPORTED);
+    /* Own tiny boot: JP 00FC; LD A,1; LDH [FF50],A => cartridge 0100. */
+    dmg[0] = 0xC3; dmg[1] = 0xFC; dmg[2] = 0;
+    dmg[0xFC] = 0x3E; dmg[0xFD] = 1; dmg[0xFE] = 0xE0; dmg[0xFF] = 0x50;
+    CHECK(gbc_boot_set_rom(&feature_gbc, dmg, 256, GBC_MODEL_DMG) == GBC_OK);
+    gbc_memset(feature_rom, 0, sizeof(feature_rom));
+    feature_rom[0] = 0xAA;
+    CHECK(gbc_load_rom(&feature_gbc, feature_rom, sizeof(feature_rom)) == GBC_OK);
+    CHECK(feature_gbc.cpu.pc == 0 && feature_gbc.mmu.io[0x40] == 0);
+    CHECK(gbc_mmu_read(&feature_gbc, 0) == 0xC3);
+    gbc_mmu_write(&feature_gbc, 0xFF50, 0);
+    CHECK(feature_gbc.boot_active);
+    CHECK(gbc_state_save_file(&feature_gbc, "feature_boot.state") == GBC_OK);
+    gbc_step(&feature_gbc); gbc_step(&feature_gbc); gbc_step(&feature_gbc);
+    CHECK(feature_gbc.cpu.pc == 0x100 && !feature_gbc.boot_active);
+    CHECK(gbc_mmu_read(&feature_gbc, 0) == 0xAA);
+    gbc_mmu_write(&feature_gbc, 0xFF50, 0);
+    CHECK(!feature_gbc.boot_active);
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_boot.state") == GBC_OK);
+    CHECK(feature_gbc.boot_active && feature_gbc.cpu.pc == 0);
+    gbc_unload_rom_discard(&feature_gbc);
+    dmg[10] ^= 1;
+    CHECK(gbc_boot_set_rom(&feature_gbc, dmg, 256, GBC_MODEL_DMG) == GBC_OK);
+    CHECK(gbc_load_rom(&feature_gbc, feature_rom, sizeof(feature_rom)) == GBC_OK);
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_boot.state") == GBC_ERROR_MISMATCH);
+    gbc_unload_rom_discard(&feature_gbc);
+    CHECK(gbc_boot_set_rom(&feature_gbc, NULL, 0, GBC_MODEL_DMG) == GBC_OK);
+    CHECK(gbc_load_rom(&feature_gbc, feature_rom, sizeof(feature_rom)) == GBC_OK);
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_boot.state") == GBC_ERROR_MISMATCH);
+    gbc_unload_rom_discard(&feature_gbc);
+    /* Compact and address-layout images map the same bytes around header gap. */
+    cgb[0] = 0x11; cgb[0x100] = 0x22; cgb[0x7FF] = 0x33;
+    CHECK(gbc_boot_set_rom(&feature_gbc, cgb, sizeof(cgb), GBC_MODEL_CGB) == GBC_OK);
+    uint32_t crc = feature_gbc.boot_crc;
+    CHECK(gbc_load_rom(&feature_gbc, feature_rom, sizeof(feature_rom)) == GBC_OK);
+    CHECK(feature_gbc.model == GBC_MODEL_CGB && feature_gbc.hardware_model == GBC_MODEL_CGB);
+    CHECK(gbc_mmu_read(&feature_gbc, 0x100) == feature_rom[0x100]);
+    CHECK(gbc_mmu_read(&feature_gbc, 0x200) == 0x22 && gbc_mmu_read(&feature_gbc, 0x8FF) == 0x33);
+    gbc_mmu_write(&feature_gbc, 0xFF4C, 4);
+    gbc_mmu_write(&feature_gbc, 0xFF6C, 1);
+    gbc_mmu_write(&feature_gbc, 0xFF50, 0x11);
+    CHECK(feature_gbc.model == GBC_MODEL_DMG && feature_gbc.boot_compat);
+    gbc_mmu_write(&feature_gbc, 0xFF4C, 0); gbc_mmu_write(&feature_gbc, 0xFF6C, 0);
+    CHECK(feature_gbc.boot_key0 == 4 && feature_gbc.boot_opri == 1);
+    gbc_memset(feature_gbc.ppu.bg_palette, 0, 64);
+    feature_gbc.mmu.io[0x40] = 0x91; feature_gbc.mmu.io[0x47] = 0;
+    gbc_ppu_render_scanline(&feature_gbc, 0);
+    CHECK(feature_gbc.ppu.line[0] == gbc_ppu_color(0, 0, 0));
+    CHECK(gbc_state_save_file(&feature_gbc, "feature_boot.state") == GBC_OK);
+    gbc_unload_rom_discard(&feature_gbc);
+    CHECK(gbc_boot_set_rom(&feature_gbc, NULL, 0, GBC_MODEL_DMG) == GBC_OK);
+    CHECK(gbc_load_rom(&feature_gbc, feature_rom, sizeof(feature_rom)) == GBC_OK);
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_boot.state") == GBC_OK);
+    CHECK(feature_gbc.boot_compat && feature_gbc.hardware_model == GBC_MODEL_CGB);
+    gbc_unload_rom_discard(&feature_gbc);
+    /* Loading an inactive CGB snapshot must not turn a bound DMG image into
+     * a CGB address map when the cartridge is subsequently reset/reloaded. */
+    CHECK(gbc_boot_set_rom(&feature_gbc, dmg, 256, GBC_MODEL_DMG) == GBC_OK);
+    CHECK(gbc_load_rom(&feature_gbc, feature_rom, sizeof(feature_rom)) == GBC_OK);
+    CHECK(gbc_state_load_file(&feature_gbc, "feature_boot.state") == GBC_OK);
+    CHECK(gbc_set_model(&feature_gbc, GBC_MODEL_CGB) == GBC_ERROR_MISMATCH);
+    CHECK(gbc_load_rom(&feature_gbc, feature_rom, sizeof(feature_rom)) == GBC_OK);
+    CHECK(feature_gbc.hardware_model == GBC_MODEL_DMG && feature_gbc.boot_active);
+    CHECK(gbc_mmu_read(&feature_gbc, 0x200) == feature_rom[0x200]);
+    gbc_unload_rom_discard(&feature_gbc);
+    gbc_memcpy(padded, cgb, 256); gbc_memcpy(padded + 512, cgb + 256, 1792);
+    CHECK(gbc_boot_set_rom(&feature_gbc, padded, sizeof(padded), GBC_MODEL_CGB) == GBC_OK);
+    CHECK(feature_gbc.boot_crc == crc);
+    CHECK(gbc_load_rom(&feature_gbc, feature_rom, sizeof(feature_rom)) == GBC_OK);
+    CHECK(gbc_mmu_read(&feature_gbc, 0x200) == 0x22 && gbc_mmu_read(&feature_gbc, 0x8FF) == 0x33);
+    gbc_unload_rom_discard(&feature_gbc);
+    CHECK(gbc_boot_set_rom(&feature_gbc, dmg, 256, GBC_MODEL_DMG) == GBC_OK);
+    feature_rom[0x143] = 0xC0;
+    CHECK(gbc_load_rom(&feature_gbc, feature_rom, sizeof(feature_rom)) == GBC_ERROR_UNSUPPORTED);
+    remove("feature_boot.state");
+    CHECK(gbc_deinit_static(&feature_gbc) == GBC_OK);
+}
+#endif
+
 int main(void)
 {
+#if (GBC_ENABLE_SRAM_SAVE == 1)
     feature_battery();
+    feature_file_battery();
+#endif
+#if (GBC_ENABLE_RTC_SAVE == 1)
     feature_rtc();
+#endif
+#if (GBC_ENABLE_SAVE_STATE == 1)
     feature_state();
+#endif
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    feature_boot();
+#endif
+    printf("feature context bytes: %zu\n", sizeof(gbc_t));
     printf("feature regression tests: %s\n", test_failures ? "FAILED" : "passed");
     return test_failures ? 1 : 0;
 }

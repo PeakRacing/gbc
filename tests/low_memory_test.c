@@ -142,6 +142,16 @@ int main(void)
         gbc.cart.ram_data != NULL || test_allocations != before) {
         test_failures++;
     }
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    static const uint8_t boot[256] = {0xC3, 0xFC, 0};
+    gbc_unload_rom_discard(&gbc);
+    if (gbc_boot_set_rom(&gbc, boot, sizeof(boot), GBC_MODEL_DMG) != GBC_OK ||
+        gbc_load_rom(&gbc, rom, sizeof(rom)) != GBC_OK || gbc.cpu.pc != 0 ||
+        !gbc.boot_active || gbc_mmu_read(&gbc, 0) != 0xC3) { test_failures++; }
+    gbc_mmu_write(&gbc, 0xFF50, 1);
+    gbc_mmu_write(&gbc, 0xFF50, 0);
+    if (gbc.boot_active || gbc_mmu_read(&gbc, 0) != rom[0]) { test_failures++; }
+#endif
     gbc_mmu_write(&gbc, 0xFF70, 7);
     gbc_mmu_write(&gbc, 0xFF4F, 1);
     gbc_mmu_write(&gbc, 0xD000, 0x5A);

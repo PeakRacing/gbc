@@ -18,6 +18,10 @@ typedef struct {
     FILE *fp;
     uint32_t remaining, crc;
     uint16_t cursor, available;
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    uint8_t saved_model, saved_hardware, saved_active, saved_compat;
+    uint8_t expected_active;
+#endif
     uint8_t phase; /* 0: encode, 1: validate, 2: apply */
     int error;
     uint8_t buffer[256];
@@ -165,9 +169,18 @@ static const gbc_state_field_t gbc_state_fields7[] = {
     {offsetof(gbc_t, cart.rtc_latched[4]), 1, sizeof(uint8_t), 1, 0, 255, 0xC1},
     {offsetof(gbc_t, cart.rtc_ms), 1, sizeof(uint16_t), 2, 0, 999, 65535UL},
 };
+#if (GBC_ENABLE_BOOT_ROM == 1)
+static const gbc_state_field_t gbc_state_boot[] = {
+    {offsetof(gbc_t, hardware_model), 1, sizeof(gbc_model_t), 4, 0, GBC_ENABLE_CGB, 1},
+    {offsetof(gbc_t, boot_active), 1, 1, 1, 0, 1, 1},
+    {offsetof(gbc_t, boot_key0), 1, 1, 1, 0, 255, 255},
+    {offsetof(gbc_t, boot_opri), 1, 1, 1, 0, 1, 1},
+    {offsetof(gbc_t, boot_compat), 1, 1, 1, 0, 1, 1},
+};
+#endif
 static const gbc_state_field_t gbc_state_fields8[] = {
-    {offsetof(gbc_t, model), 1, sizeof(gbc_model_t), 4, 0, 1, 4294967295UL},
-    {offsetof(gbc_t, preferred_model), 1, sizeof(gbc_model_t), 4, 0, 1, 4294967295UL},
+    {offsetof(gbc_t, model), 1, sizeof(gbc_model_t), 4, !GBC_ENABLE_DMG, GBC_ENABLE_CGB, 1},
+    {offsetof(gbc_t, preferred_model), 1, sizeof(gbc_model_t), 4, !GBC_ENABLE_DMG, GBC_ENABLE_CGB, 1},
     {offsetof(gbc_t, frame_count), 1, sizeof(uint32_t), 4, 0, 4294967295UL, 4294967295UL},
 };
 #if (GBC_FRAME_SKIP != 0)
@@ -248,6 +261,12 @@ static void gbc_state_fields(gbc_state_io_t *io, gbc_t *gbc, const gbc_state_fie
                 if (value < f->minimum || value > f->maximum || (value & ~f->mask)) {
                     io->error = GBC_ERROR_FORMAT; return;
                 }
+#if (GBC_ENABLE_BOOT_ROM == 1)
+                if (f->offset == offsetof(gbc_t, model)) { io->saved_model = (uint8_t)value; }
+                if (f->offset == offsetof(gbc_t, hardware_model)) { io->saved_hardware = (uint8_t)value; }
+                if (f->offset == offsetof(gbc_t, boot_active)) { io->saved_active = (uint8_t)value; }
+                if (f->offset == offsetof(gbc_t, boot_compat)) { io->saved_compat = (uint8_t)value; }
+#endif
                 if (io->phase == 2) {
                     if (f->native_width == 1) { *ptr = (uint8_t)value; }
                     else if (f->native_width == 2) { uint16_t n = (uint16_t)value; gbc_memcpy(ptr, &n, 2); }
@@ -287,6 +306,9 @@ static uint32_t gbc_state_payload_size(gbc_t *gbc)
 #endif
     length += GBC_STATE_TABLE_SIZE(gbc_state_fields7);
     length += GBC_STATE_TABLE_SIZE(gbc_state_fields8);
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    length += GBC_STATE_TABLE_SIZE(gbc_state_boot);
+#endif
 #if (GBC_FRAME_SKIP != 0)
     length += GBC_STATE_TABLE_SIZE(gbc_state_skip);
 #endif
@@ -305,6 +327,16 @@ static void gbc_state_payload(gbc_state_io_t *io, gbc_t *gbc)
 #endif
     GBC_STATE_TABLE(io, gbc, 7, gbc_state_fields7);
     GBC_STATE_TABLE(io, gbc, 8, gbc_state_fields8);
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    GBC_STATE_TABLE(io, gbc, 9, gbc_state_boot);
+    if (io->phase && io->error == GBC_OK &&
+        (io->saved_active != io->expected_active ||
+         (io->saved_active && (io->saved_compat || io->saved_hardware != (gbc->boot_size == 256 ? GBC_MODEL_DMG : GBC_MODEL_CGB) || io->saved_model != io->saved_hardware)) ||
+         (io->saved_compat && (io->saved_hardware != GBC_MODEL_CGB || io->saved_model != GBC_MODEL_DMG)) ||
+         (!io->saved_active && !io->saved_compat && io->saved_model != io->saved_hardware))) {
+        io->error = GBC_ERROR_FORMAT;
+    }
+#endif
 #if (GBC_FRAME_SKIP != 0)
     GBC_STATE_TABLE(io, gbc, 11, gbc_state_skip);
 #endif
@@ -349,7 +381,7 @@ static int gbc_state_rom_crc(gbc_t *gbc, uint32_t *out)
 static uint32_t gbc_state_config(void)
 {
     /* Presentation/storage choices do not affect serialized emulation state. */
-    uint32_t flags = GBC_ENABLE_SOUND | (GBC_ENABLE_DMG << 1) | (GBC_ENABLE_CGB << 2) | (GBC_USE_SRAM << 3);
+    uint32_t flags = GBC_ENABLE_SOUND | (GBC_ENABLE_DMG << 1) | (GBC_ENABLE_CGB << 2) | (GBC_USE_SRAM << 3) | (GBC_ENABLE_BOOT_ROM << 4);
     return flags;
 }
 
@@ -365,6 +397,10 @@ static int gbc_state_header(gbc_t *gbc, uint8_t header[48])
     gbc_state_put32(header + 12, gbc_state_config());
     gbc_state_put32(header + 16, gbc->cart.ram_size);
     gbc_state_put32(header + 20, gbc->cart.header.mbc);
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    gbc_state_put32(header + 24, gbc->boot_active ? gbc->boot_crc : 0);
+    gbc_state_put32(header + 44, gbc->boot_active ? 1 : 0);
+#endif
     gbc_state_put32(header + 28, gbc_state_payload_size(gbc));
 #if (GBC_ENABLE_SOUND == 1)
     gbc_state_put32(header + 32, GBC_APU_SAMPLE_RATE);
@@ -410,7 +446,17 @@ int gbc_state_load_file(gbc_t *gbc, const char *path)
         ret = GBC_ERROR_FORMAT;
     } else if (gbc_fread(header, 1, sizeof(header), fp) != sizeof(header)) {
         ret = GBC_ERROR_IO;
-    } else if (gbc_memcmp(header, expected, sizeof(header)) != 0) {
+    }
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    if (ret == GBC_OK) {
+        uint32_t active = gbc_state_get32(header + 44);
+        if (active > 1 || (active && (!gbc->boot_rom || gbc_state_get32(header + 24) != gbc->boot_crc)) ||
+            (!active && gbc_state_get32(header + 24))) { ret = GBC_ERROR_MISMATCH; }
+        gbc_state_put32(expected + 24, gbc_state_get32(header + 24));
+        gbc_state_put32(expected + 44, active);
+    }
+#endif
+    if (ret == GBC_OK && gbc_memcmp(header, expected, sizeof(header)) != 0) {
         ret = GBC_ERROR_MISMATCH;
     }
     gbc_state_io_t io = {0};
@@ -418,6 +464,9 @@ int gbc_state_load_file(gbc_t *gbc, const char *path)
         if (phase == 2 && gbc_fseek(fp, 48, SEEK_SET) != 0) { ret = GBC_ERROR_IO; break; }
         gbc_memset(&io, 0, sizeof(io));
         io.fp = fp; io.phase = phase; io.remaining = length;
+#if (GBC_ENABLE_BOOT_ROM == 1)
+        io.expected_active = (uint8_t)gbc_state_get32(header + 44);
+#endif
         io.crc = gbc_storage_crc(0xFFFFFFFFUL, header, sizeof(header));
         gbc_state_payload(&io, gbc);
         ret = io.error;

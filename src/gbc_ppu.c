@@ -186,7 +186,12 @@ static uint8_t gbc_ppu_render_bg_window(gbc_t *gbc, uint8_t ly)
         if (model == GBC_MODEL_CGB) {
             ppu->line[x] = gbc_ppu_cgb_color(ppu->bg_palette, attr & 0x07, color_id);
         } else {
-            ppu->line[x] = gbc_ppu_dmg_color(mmu->io[0x47], color_id);
+#if (GBC_ENABLE_BOOT_ROM == 1)
+            if (gbc->boot_compat) {
+                ppu->line[x] = gbc_ppu_cgb_color(ppu->bg_palette, 0, (mmu->io[0x47] >> (color_id * 2)) & 3);
+            } else
+#endif
+            { ppu->line[x] = gbc_ppu_dmg_color(mmu->io[0x47], color_id); }
         }
     }
     return win_used;
@@ -219,7 +224,11 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
 
     /* Select in OAM order. DMG draws lower X first, CGB draws lower OAM
      * index first. https://gbdev.io/pandocs/OAM.html#drawing-priority */
-    if (model == GBC_MODEL_DMG) {
+    if (model == GBC_MODEL_DMG
+#if (GBC_ENABLE_BOOT_ROM == 1)
+        || (gbc->hardware_model == GBC_MODEL_CGB && gbc->boot_opri)
+#endif
+    ) {
         for (uint8_t i = 1; i < sprite_count; i++) {
             uint8_t sprite = sprites[i];
             uint8_t x = oam_data[sprite * 4 + 1];
@@ -273,7 +282,13 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
             if (model == GBC_MODEL_CGB) {
                 ppu->line[screen_x] = gbc_ppu_cgb_color(ppu->obj_palette, attr & 0x07, color_id);
             } else {
-                ppu->line[screen_x] = gbc_ppu_dmg_color((attr & 0x10) ? mmu->io[0x49] : mmu->io[0x48], color_id);
+                uint8_t palette = (attr & 0x10) ? mmu->io[0x49] : mmu->io[0x48];
+#if (GBC_ENABLE_BOOT_ROM == 1)
+                if (gbc->boot_compat) {
+                    ppu->line[screen_x] = gbc_ppu_cgb_color(ppu->obj_palette, (attr & 0x10) ? 1 : 0, (palette >> (color_id * 2)) & 3);
+                } else
+#endif
+                { ppu->line[screen_x] = gbc_ppu_dmg_color(palette, color_id); }
             }
         }
     }

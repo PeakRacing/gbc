@@ -32,6 +32,12 @@ typedef struct gbc {
 #if (GBC_FRAME_SKIP != 0)
     uint8_t gbc_frame_skip_count;
 #endif
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    const uint8_t *boot_rom;
+    uint32_t boot_size, boot_crc;
+    gbc_model_t hardware_model;
+    uint8_t boot_active, boot_key0, boot_opri, boot_compat;
+#endif
     gbc_model_t model;
     gbc_model_t preferred_model;
     uint32_t frame_count;
@@ -58,6 +64,12 @@ int gbc_deinit(gbc_t *gbc);
 void gbc_run(gbc_t *gbc);
 uint8_t gbc_step(gbc_t *gbc);
 int gbc_set_model(gbc_t *gbc, gbc_model_t model);
+#if (GBC_ENABLE_BOOT_ROM == 1)
+/* Bind before loading a cartridge. NULL/0 detaches. Borrowed immutable storage. */
+int gbc_boot_set_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size, gbc_model_t hardware);
+void gbc_boot_reset(gbc_t *gbc);
+void gbc_boot_unmap(gbc_t *gbc);
+#endif
 
 #if (GBC_USE_FS == 1)
 int gbc_load_file(gbc_t *gbc, const char *file_path);

@@ -234,6 +234,7 @@ void gbc_cart_rtc_sync(gbc_t *gbc)
     gbc_cart_rtc_add_seconds(cart, seconds);
 }
 
+#if (GBC_USE_SRAM == 1)
 static uint8_t gbc_cart_rtc_read(gbc_t *gbc)
 {
     uint8_t index = gbc_cart_rtc_index(gbc->cart.rtc_select);
@@ -281,6 +282,8 @@ static void gbc_cart_rtc_write(gbc_t *gbc, uint8_t data)
     cart->rtc_started = 1;
 }
 
+#endif
+
 static void gbc_cart_rtc_latch(gbc_t *gbc, uint8_t data)
 {
     gbc_cart_t *cart = &gbc->cart;
@@ -304,6 +307,10 @@ int gbc_cart_load_rom(gbc_t *gbc, const uint8_t *rom, uint32_t size, uint8_t tak
         return GBC_ERROR_BAD_ROM;
     }
 
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    if (gbc->boot_rom && gbc->boot_size == 256 &&
+        size > 0x143 && rom[0x143] == 0xC0) { return GBC_ERROR_UNSUPPORTED; }
+#endif
     cart = &gbc->cart;
     ret = gbc_unload_rom(gbc);
     if (ret != GBC_OK) {

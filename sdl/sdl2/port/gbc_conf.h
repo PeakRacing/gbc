@@ -4,6 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 #pragma once
+#ifndef GBC_ENABLE_BOOT_ROM
+#define GBC_ENABLE_BOOT_ROM 1
+#endif
 #ifndef GBC_ENABLE_SAVE_STATE
 #define GBC_ENABLE_SAVE_STATE (1)
 #endif

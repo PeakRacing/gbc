@@ -23,6 +23,9 @@ static void gbc_reset(gbc_t *gbc)
     gbc_ppu_reset(gbc);
     gbc_apu_reset(gbc);
     gbc_cpu_reset(gbc);
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    gbc_boot_reset(gbc);
+#endif
 }
 
 /** Initialize caller-owned emulator state without allocating its context. */
@@ -165,7 +168,7 @@ uint8_t gbc_step(gbc_t *gbc)
 {
     uint8_t cycles;
 
-    if (gbc == NULL || gbc->cart.rom_data == NULL) {
+    if (gbc == NULL || gbc->gbc_quit || gbc->cart.rom_data == NULL) {
         return 0;
     }
     cycles = gbc_cpu_step(gbc);
@@ -204,6 +207,10 @@ int gbc_set_model(gbc_t *gbc, gbc_model_t model)
     if (gbc == NULL) {
         return GBC_ERROR;
     }
+    if (model != GBC_MODEL_DMG && model != GBC_MODEL_CGB) { return GBC_ERROR_UNSUPPORTED; }
+#if (GBC_ENABLE_BOOT_ROM == 1)
+    if (gbc->boot_rom && (gbc->boot_size == 256 ? GBC_MODEL_DMG : GBC_MODEL_CGB) != model) { return GBC_ERROR_MISMATCH; }
+#endif
     if (model == GBC_MODEL_CGB) {
 #if (GBC_ENABLE_CGB == 0)
         return GBC_ERROR_UNSUPPORTED;

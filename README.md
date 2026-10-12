@@ -96,6 +96,9 @@ All macros are set in `port/gbc_conf.h`. Defaults are tuned for PC/SDL debugging
 | `GBC_COLOR_SWAP` | `0` | Swap RGB565 bytes for SPI panels |
 | `GBC_USE_FS` | `1` | Enable filesystem-based ROM loading |
 | `GBC_ENABLE_SRAM_SAVE` | `(GBC_USE_FS)` | Save battery-backed RAM to `.sav` file; auto-disabled when `GBC_USE_FS=0` |
+| `GBC_ENABLE_RTC_SAVE` | `(GBC_ENABLE_SRAM_SAVE)` | MBC3 `.rtc` sidecar; offline time is paused |
+| `GBC_ENABLE_SAVE_STATE` | `0` | Versioned file snapshots; requires filesystem |
+| `GBC_ENABLE_BOOT_ROM` | `0` | Borrow an externally supplied DMG/CGB boot image |
 | `GBC_ROM_STREAM` | `0` | `1`: stream ROM banks from file with LRU bank cache |
 | `GBC_ROM_CACHE_BANKS` | `4` | Number of 16 KiB ROM cache banks for streaming mode |
 | `GBC_LOG_LEVEL` | `GBC_LOG_LEVEL_INFO` | Log verbosity |
@@ -123,6 +126,14 @@ Replace or implement the following functions in your platform port:
 - `gbc_log_printf`
 - `gbc_get_ticks` / `gbc_delay`
 - `gbc_initex` / `gbc_deinitex` / `gbc_frame` — optional lifecycle hooks
+- File persistence: `gbc_file_sync`, `gbc_file_replace`, `gbc_file_remove`, `gbc_file_exists`; replacement must preserve the old file on failure.
+- Save-state ports: `gbc_state_loaded` clears queued audio and presentation pacing.
+
+SDL accepts `--boot-rom image.bin`; without it startup remains immediate. F6 saves
+battery RAM/RTC, F5 saves one snapshot slot, F9 restores it. Exit save failure
+offers retry, continued play, or explicit discard. Core file/Flash APIs and error
+handling are documented in [storage](docs/storage.md), [Boot ROM](docs/boot_rom.md),
+and [validation/resource results](docs/storage_validation.md).
 
 ## Known Limitations
 
