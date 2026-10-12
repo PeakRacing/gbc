@@ -73,6 +73,15 @@
 #define GBC_PERSIST_ENABLE ((GBC_USE_FS == 1) && (GBC_USE_SRAM == 1) && ((GBC_ENABLE_SRAM_SAVE == 1) || (GBC_ENABLE_RTC_SAVE == 1)))
 #define GBC_STORAGE_ENABLE ((GBC_USE_FS == 1) && ((GBC_PERSIST_ENABLE) || (GBC_ENABLE_SAVE_STATE == 1)))
 
+/* Optional idle HALT aggregation. Peripherals still advance in 4 CPU clocks.
+ * Default preserves one CPU step per gbc_step call. uint8_t return bounds it. */
+#ifndef GBC_HALT_BATCH_CYCLES
+#define GBC_HALT_BATCH_CYCLES (4)
+#endif
+#if GBC_HALT_BATCH_CYCLES < 4 || GBC_HALT_BATCH_CYCLES > 252 || (GBC_HALT_BATCH_CYCLES % 4) != 0
+#error "GBC_HALT_BATCH_CYCLES must be a multiple of 4 from 4 to 252"
+#endif
+
 #ifndef GBC_FRAME_SKIP
 #define GBC_FRAME_SKIP              (0)
 #endif
@@ -211,4 +220,3 @@ void gbc_delay(uint32_t ms);
 #ifdef __cplusplus
     }
 #endif
-

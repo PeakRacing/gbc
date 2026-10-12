@@ -167,11 +167,22 @@ int gbc_unload_file(gbc_t *gbc)
 uint8_t gbc_step(gbc_t *gbc)
 {
     uint8_t cycles;
+#if (GBC_HALT_BATCH_CYCLES > 4)
+    uint8_t total = 0;
+#endif
 
     if (gbc == NULL || gbc->gbc_quit || gbc->cart.rom_data == NULL) {
         return 0;
     }
-    cycles = gbc_cpu_step(gbc);
+#if (GBC_HALT_BATCH_CYCLES > 4)
+    do {
+        if (total != 0) {
+            /* Only enter for an idle HALT with no pending enabled interrupt. */
+            gbc->cpu.cycles += 4;
+            cycles = 4;
+        } else
+#endif
+        cycles = gbc_cpu_step(gbc);
     /* In CGB fast mode, the CPU runs at 8 MHz while PPU/APU still
      * run at 4 MHz. DIV/TIMA and serial follow the CPU clock.
      * Halve the cycles passed to PPU/APU so they advance
@@ -187,6 +198,14 @@ uint8_t gbc_step(gbc_t *gbc)
         gbc_apu_step(gbc, sub_cycles);
     }
 
+#if (GBC_HALT_BATCH_CYCLES > 4)
+        total = (uint8_t)(total + cycles);
+    } while (!gbc->gbc_quit && gbc->cpu.halted &&
+             gbc->mmu.hdma_busy_cycles == 0 && !gbc->ppu.frame_ready &&
+             (gbc->mmu.ie & gbc->mmu.io[0x0F] & 0x1F) == 0 &&
+             total <= GBC_HALT_BATCH_CYCLES - 4);
+#endif
+
     if (gbc->ppu.frame_ready) {
         gbc->ppu.frame_ready = 0;
         gbc->frame_count++;
@@ -199,7 +218,11 @@ uint8_t gbc_step(gbc_t *gbc)
 #endif
         gbc_frame(gbc);
     }
+#if (GBC_HALT_BATCH_CYCLES > 4)
+    return total;
+#else
     return cycles;
+#endif
 }
 
 int gbc_set_model(gbc_t *gbc, gbc_model_t model)

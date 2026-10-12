@@ -176,3 +176,10 @@ Sound-enabled builds now emit silent PCM at the configured cadence with NR52
 off while channel clocks remain frozen. No new configuration or save format is
 introduced. Board-only scaling, profiling hooks and compiler LTO flags stay in
 the firmware repository. See [review and measured limits](docs/performance_review.md).
+
+`GBC_HALT_BATCH_CYCLES` defaults to 4; MCU ports may opt into bounded idle
+HALT aggregation (for example 64). `gbc_step` then returns the accumulated
+CPU clocks while retaining 4-clock peripheral/PCM granularity. See
+[performance review](docs/performance_review.md) for checks and board results.
+Run `python tests/performance_regression.py --render-matrix` for the expanded
+renderer and idle HALT differential matrix.

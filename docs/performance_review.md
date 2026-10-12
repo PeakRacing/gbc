@@ -18,3 +18,28 @@ GB 马里奥大陆 14.020→31.163 FPS；GBC 马里奥豪华版 7.699→18.422 F
 
 执行：sdl/sdl2 的 xmake 全目标构建、CPU/APU/低内存、存档/RTC/Boot/流式配置
 回归；tests/performance_regression.py 提供独立历史实现的差分检查。
+
+## Follow-up: bounded idle HALT aggregation
+
+`GBC_HALT_BATCH_CYCLES` defaults to 4 (the original single-step contract).
+Values 4..252 must be multiples of 4. At 64 the port can consume several
+idle HALT steps in one call, returning the total CPU clocks. Every peripheral
+and PCM step still runs at the original 4 CPU-clock granularity (2 PPU/APU
+clocks in double speed). Enabled pending IRQs, DMA stalls, frame boundaries
+and quit requests end the batch. No fields or persistence layout change.
+
+Whole-step differential: 12000 randomized contexts per configuration, both
+sound settings and bounds 8/64/252 (72000 total). Checks the entire context,
+including PCM phase/buffer, timer reload, serial, DMA stalls, interrupts and
+frame completion. Ten real ROMs at 600 frames retain exact CPU/PPU/pixel/PCM
+replay; the actual RT adapter fault-injection suite passes with batching on.
+
+F1C200S first RAM comparison: GB 31.146 -> 36.365 FPS; GBC 18.421 -> 21.395
+FPS, same ROMs, full frames, 32 kHz stereo and clocks. Hardware repeat and
+firmware deployment evidence belong to the firmware repository. Still below
+real time; audio underruns remain.
+
+Rejected experiment: tile-row spans passed 20000 random scanline comparisons,
+but measured GB 31.146 -> 30.062 FPS and GBC 18.421 -> 18.499 FPS. The renderer
+change was reverted; differential coverage remains, also checking RGB565
+byte swapping and CGB/DMG boot compatibility.

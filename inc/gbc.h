@@ -62,6 +62,8 @@ int gbc_deinit_static(gbc_t *gbc);
 gbc_t *gbc_init(void);
 int gbc_deinit(gbc_t *gbc);
 void gbc_run(gbc_t *gbc);
+/* Returns CPU clocks consumed. GBC_HALT_BATCH_CYCLES > 4 permits bounded
+ * idle HALT aggregation; peripheral and PCM stepping retains 4-clock granularity. */
 uint8_t gbc_step(gbc_t *gbc);
 int gbc_set_model(gbc_t *gbc, gbc_model_t model);
 #if (GBC_ENABLE_BOOT_ROM == 1)
