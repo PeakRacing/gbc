@@ -708,14 +708,24 @@ static void expect_color(const char *name, gbc_color_t actual, gbc_color_t expec
 }
 
 /* Object palette ram holds 15 bit RGB555 colours, two bytes each, red in bits
- * 0..4, green in 5..9, blue in 10..14.  install_cgb_obj_palette therefore takes
- * the 8 bit wide colour the framebuffer uses and stores the matching 5 bit
- * value, so a test can compare a rendered pixel against the same colour. */
+ * 0..4, green in 5..9, blue in 10..14. Decode the configured framebuffer
+ * representation, including RGB565 byte swapping, into matching 5-bit values
+ * so a test can compare a rendered pixel against the same colour. */
 static uint16_t rgb555_from_color(gbc_color_t color)
 {
+#if (GBC_COLOR_DEPTH == 32)
     uint8_t r5 = (uint8_t)((((color >> 16) & 0xFF) >> 3) & 0x1F);
     uint8_t g5 = (uint8_t)((((color >> 8) & 0xFF) >> 3) & 0x1F);
     uint8_t b5 = (uint8_t)(((color & 0xFF) >> 3) & 0x1F);
+#else
+    uint16_t raw = color;
+#if (GBC_COLOR_SWAP == 1)
+    raw = (uint16_t)((raw << 8) | (raw >> 8));
+#endif
+    uint8_t r5 = (uint8_t)((raw >> 11) & 0x1F);
+    uint8_t g5 = (uint8_t)((raw >> 6) & 0x1F);
+    uint8_t b5 = (uint8_t)(raw & 0x1F);
+#endif
 
     return (uint16_t)((b5 << 10) | (g5 << 5) | r5);
 }

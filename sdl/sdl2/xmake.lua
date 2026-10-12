@@ -21,6 +21,16 @@ target("fast_run_test", function ()
     add_files("../../src/**.c", "../../tests/fast_run_test.c", "../../tests/fs_hooks.c")
 end)
 
+for _, swapped in ipairs({false, true}) do
+    target(swapped and "fast_run_rgb565_swap_test" or "fast_run_rgb565_test", function ()
+        set_kind("binary")
+        add_includedirs("../../tests/feature_port", "../../inc")
+        add_defines("GBC_ENABLE_FAST_RUN=1", "GBC_ENABLE_SOUND=1", "GBC_COLOR_DEPTH=16",
+                    swapped and "GBC_COLOR_SWAP=1" or "GBC_COLOR_SWAP=0")
+        add_files("../../src/**.c", "../../tests/fast_run_test.c", "../../tests/fs_hooks.c")
+    end)
+end
+
 target("rom_fast_test", function ()
     set_kind("binary")
     add_includedirs("../../tests/rom_port", "../../inc")
