@@ -99,6 +99,8 @@ uint32_t gbc_run_cycles(gbc_t *gbc, uint32_t budget)
 {
     uint32_t total = 0;
     if (!gbc || !budget || gbc->gbc_quit || !gbc->cart.rom_data || gbc->running) return 0;
+    /* Leave room for the last whole instruction/idle event's overshoot. */
+    if (budget > UINT32_MAX - 252U) budget = UINT32_MAX - 252U;
 #if (GBC_ENABLE_FAST_RUN == 1)
     if (gbc->run_mode == GBC_RUN_FAST) {
         gbc->running = 1;

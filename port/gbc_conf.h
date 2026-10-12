@@ -5,6 +5,10 @@
  */
 #pragma once
 
+#ifndef GBC_ENABLE_FAST_RUN
+#define GBC_ENABLE_FAST_RUN         (0)       /* optional workspace; reference remains default */
+#endif
+
 #ifdef __cplusplus
     extern "C" {
 #endif

@@ -76,7 +76,8 @@ uint8_t gbc_step(gbc_t *gbc);
 /* Switch only between calls, never from a running callback. FAST allocation
  * failure leaves the current mode unchanged. Contexts are not thread-safe. */
 int gbc_set_run_mode(gbc_t *gbc, gbc_run_mode_t mode);
-/* Executes whole instructions; returns actual clocks including overshoot. */
+/* Executes whole instructions; returns actual clocks including overshoot.
+ * Requests above UINT32_MAX-252 are capped to keep the return representable. */
 uint32_t gbc_run_cycles(gbc_t *gbc, uint32_t budget);
 int gbc_set_model(gbc_t *gbc, gbc_model_t model);
 #if (GBC_ENABLE_BOOT_ROM == 1)
