@@ -19,6 +19,24 @@ void gbc_fast_rebuild(gbc_t *gbc);
 void gbc_fast_flush_audio(gbc_t *gbc);
 void gbc_apu_fast_step(gbc_t *gbc, uint32_t cycles);
 void gbc_ppu_fast_step(gbc_t *gbc, uint8_t cycles);
+/* Most CPU instructions cannot reach a PPU event. Keep this small path in
+ * the scheduler; mode/LY/IRQ/DMA/render events still use the original handler. */
+GBC_INLINE void gbc_fast_ppu_advance(gbc_t *gbc, uint8_t cycles)
+{
+    gbc_fast_t *fast = gbc->fast;
+    gbc_ppu_t *ppu = &gbc->ppu;
+    if (gbc->mmu.io[0x40] & 0x80) {
+        uint16_t next = (uint16_t)(ppu->dot_cycles + cycles);
+        if (fast->next_dot && next < fast->next_dot) {
+            ppu->dot_cycles = next;
+            return;
+        }
+    } else if (!ppu->dot_cycles && !ppu->mode && !gbc->mmu.io[0x44] &&
+               !fast->next_dot && !fast->latched) {
+        return; /* LCD-off state already normalized by the event handler. */
+    }
+    gbc_ppu_fast_step(gbc, cycles);
+}
 void gbc_fast_palette_write(gbc_t *gbc, uint8_t object, uint8_t byte);
 void gbc_fast_dmg_palette_write(gbc_t *gbc, uint8_t reg);
 GBC_INLINE void gbc_fast_vram_dirty(gbc_t *gbc, uint8_t bank, uint16_t addr)

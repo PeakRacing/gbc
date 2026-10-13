@@ -291,6 +291,38 @@ static void test_random_scanlines(void)
     gbc_deinit_static(&fast);
 }
 
+static void test_ppu_inline_equivalence(void)
+{
+    static gbc_t a, b;
+    static const uint8_t registers[] = {0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x47, 0x4A, 0x4B};
+    for (unsigned model = 0; model < 2; model++) {
+        fast_setup(&a, model); fast_setup(&b, model);
+        for (unsigned i = 0; i < sizeof(a.mmu.vram); i++)
+            ((uint8_t *)a.mmu.vram)[i] = ((uint8_t *)b.mmu.vram)[i] = random_byte();
+        for (unsigned i = 0; i < sizeof(a.mmu.oam); i++)
+            a.mmu.oam[i] = b.mmu.oam[i] = random_byte();
+        for (unsigned i = 0; i < 30000; i++) {
+            if ((i & 31) == 0) {
+                uint8_t reg = registers[random_byte() % sizeof(registers)];
+                uint8_t data = random_byte();
+                gbc_mmu_write(&a, (uint16_t)(0xFF00 | reg), data);
+                gbc_mmu_write(&b, (uint16_t)(0xFF00 | reg), data);
+            }
+            if ((i & 511) == 0) { gbc_fast_rebuild(&a); gbc_fast_rebuild(&b); }
+            uint8_t cycles = random_byte();
+            gbc_fast_ppu_advance(&a, cycles); gbc_ppu_fast_step(&b, cycles);
+            expect_int("inline PPU IO", memcmp(a.mmu.io, b.mmu.io, sizeof(a.mmu.io)), 0);
+            expect_int("inline PPU state", memcmp(&a.ppu, &b.ppu, sizeof(a.ppu)), 0);
+            if ((i & 127) == 0) {
+                expect_int("inline PPU derived", memcmp(a.fast, b.fast, sizeof(*a.fast)), 0);
+                expect_int("inline PPU pixels", memcmp(a.gbc_draw_data, b.gbc_draw_data, sizeof(a.gbc_draw_data)), 0);
+            }
+        }
+        expect_int("inline PPU unload a", gbc_unload_rom_discard(&a), GBC_OK);
+        expect_int("inline PPU unload b", gbc_unload_rom_discard(&b), GBC_OK);
+        gbc_deinit_static(&a); gbc_deinit_static(&b);
+    }
+}
 int main(void)
 {
     core_reference_suite();
@@ -300,6 +332,7 @@ int main(void)
     test_audio_batch_partition();
     test_late_ly_write_selection();
     test_random_scanlines();
+    test_ppu_inline_equivalence();
     printf("fast workspace=%u bytes; fast tests %s\n", (unsigned)sizeof(gbc_fast_t), test_failures ? "FAILED" : "passed");
     return test_failures ? 1 : 0;
 }

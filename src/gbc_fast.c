@@ -119,7 +119,7 @@ uint32_t gbc_run_cycles(gbc_t *gbc, uint32_t budget)
             gbc_mmu_step_dma(gbc, cycles);
             gbc_mmu_step_serial(gbc, cycles);
             gbc_timer_step(gbc, cycles);
-            gbc_ppu_fast_step(gbc, dots);
+            gbc_fast_ppu_advance(gbc, dots);
             gbc->fast->apu_pending += dots;
             /* Bound audio/control latency even with the LCD disabled. */
             if (gbc->fast->apu_pending >= GBC_FAST_AUDIO_BATCH_DOTS) gbc_fast_flush_audio(gbc);
