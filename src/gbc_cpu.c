@@ -4,7 +4,6 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 #include "gbc.h"
-#include <stddef.h>
 
 #define CPU_A(cpu)       ((cpu)->af.hi)
 #define CPU_F(cpu)       ((cpu)->af.lo)
@@ -63,25 +62,8 @@ GBC_INLINE uint16_t cpu_pop16(gbc_t *gbc)
     return (uint16_t)(lo | (hi << 8));
 }
 
-#if (GBC_ENABLE_FAST_RUN == 1)
-/* Named-member offsets preserve either host byte order. (HL) still uses
- * the MMU; only register-byte dispatch is replaced. */
-static const uint8_t cpu_r_offset[8] = {
-    offsetof(gbc_cpu_t, bc.hi), offsetof(gbc_cpu_t, bc.lo),
-    offsetof(gbc_cpu_t, de.hi), offsetof(gbc_cpu_t, de.lo),
-    offsetof(gbc_cpu_t, hl.hi), offsetof(gbc_cpu_t, hl.lo),
-    0, offsetof(gbc_cpu_t, af.hi)
-};
-typedef char cpu_register_offsets_fit_byte[(sizeof(gbc_cpu_t) <= 256) ? 1 : -1];
-#endif
-
 GBC_INLINE uint8_t cpu_get_r(gbc_t *gbc, uint8_t r)
 {
-#if (GBC_ENABLE_FAST_RUN == 1)
-    r &= 7;
-    if (r == 6) return gbc_mmu_read(gbc, gbc->cpu.hl.w);
-    return ((const unsigned char *)&gbc->cpu)[cpu_r_offset[r]];
-#else
     switch (r & 7) {
     case 0: return CPU_B(&gbc->cpu);
     case 1: return CPU_C(&gbc->cpu);
@@ -92,16 +74,10 @@ GBC_INLINE uint8_t cpu_get_r(gbc_t *gbc, uint8_t r)
     case 6: return gbc_mmu_read(gbc, gbc->cpu.hl.w);
     default: return CPU_A(&gbc->cpu);
     }
-#endif
 }
 
 GBC_INLINE void cpu_set_r(gbc_t *gbc, uint8_t r, uint8_t value)
 {
-#if (GBC_ENABLE_FAST_RUN == 1)
-    r &= 7;
-    if (r == 6) gbc_mmu_write(gbc, gbc->cpu.hl.w, value);
-    else ((unsigned char *)&gbc->cpu)[cpu_r_offset[r]] = value;
-#else
     switch (r & 7) {
     case 0: CPU_B(&gbc->cpu) = value; break;
     case 1: CPU_C(&gbc->cpu) = value; break;
@@ -112,7 +88,6 @@ GBC_INLINE void cpu_set_r(gbc_t *gbc, uint8_t r, uint8_t value)
     case 6: gbc_mmu_write(gbc, gbc->cpu.hl.w, value); break;
     default: CPU_A(&gbc->cpu) = value; break;
     }
-#endif
 }
 
 GBC_INLINE void cpu_set_flags(gbc_t *gbc, uint8_t z, uint8_t n, uint8_t h, uint8_t c)

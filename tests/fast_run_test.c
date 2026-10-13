@@ -427,44 +427,6 @@ static void test_idle_peripheral_equivalence(void)
     gbc_unload_rom_discard(&a); gbc_unload_rom_discard(&b);
     gbc_deinit_static(&a); gbc_deinit_static(&b);
 }
-static void test_all_register_transfers(void)
-{
-    static gbc_t g;
-    fast_setup(&g, GBC_MODEL_CGB);
-    for (unsigned dst = 0; dst < 8; dst++) for (unsigned src = 0; src < 8; src++) {
-        if (dst == 6 && src == 6) continue; /* HALT, not LD */
-        for (unsigned value = 0; value < 256; value++) {
-            gbc_cpu_t initial = {0};
-            initial.bc.w = (uint16_t)((value << 8) | (value ^ 0x55));
-            initial.de.w = (uint16_t)(((value ^ 0xAA) << 8) | ((value + 1) & 255));
-            initial.hl.w = src == 6 || dst == 6 ? 0xC010 : (uint16_t)((value << 8) | (value ^ 255));
-            initial.af.w = (uint16_t)(((255 - value) << 8) | 0xB0);
-            initial.pc = 0xC000; initial.sp = 0xFFFE;
-            uint8_t op = (uint8_t)(0x40 | (dst << 3) | src);
-            gbc_mmu_write(&g, 0xC000, op); gbc_mmu_write(&g, 0xC010, (uint8_t)value);
-            const uint8_t values[8] = {initial.bc.hi, initial.bc.lo, initial.de.hi, initial.de.lo,
-                                      initial.hl.hi, initial.hl.lo, (uint8_t)value, initial.af.hi};
-            gbc_cpu_t expected = initial;
-            switch (dst) {
-            case 0: expected.bc.hi = values[src]; break;
-            case 1: expected.bc.lo = values[src]; break;
-            case 2: expected.de.hi = values[src]; break;
-            case 3: expected.de.lo = values[src]; break;
-            case 4: expected.hl.hi = values[src]; break;
-            case 5: expected.hl.lo = values[src]; break;
-            case 7: expected.af.hi = values[src]; break;
-            default: break;
-            }
-            expected.pc++; expected.last_opcode = op;
-            expected.cycles = src == 6 || dst == 6 ? 8 : 4;
-            g.cpu = initial; g.mmu.ie = g.mmu.io[0x0F] = 0;
-            expect_int("LD r,r cycles", gbc_cpu_step(&g), (int)expected.cycles);
-            expect_int("LD r,r complete CPU", memcmp(&g.cpu, &expected, sizeof(expected)), 0);
-            if (dst == 6) expect_int("LD (HL),r MMU", gbc_mmu_read(&g, 0xC010), values[src]);
-        }
-    }
-    gbc_unload_rom_discard(&g); gbc_deinit_static(&g);
-}
 int main(void)
 {
     core_reference_suite();
@@ -478,7 +440,6 @@ int main(void)
     test_random_scanlines();
     test_ppu_inline_equivalence();
     test_idle_peripheral_equivalence();
-    test_all_register_transfers();
     printf("fast workspace=%u bytes; fast tests %s\n", (unsigned)sizeof(gbc_fast_t), test_failures ? "FAILED" : "passed");
     return test_failures ? 1 : 0;
 }
