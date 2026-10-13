@@ -1,10 +1,6 @@
 /* Copyright PeakRacing; SPDX-License-Identifier: Apache-2.0 */
 #include "gbc_fast.h"
 
-/* Nominal 0.122 ms at the base clock, with whole-instruction overshoot.
- * MMIO and run-call boundaries settle earlier; large budgets stay bounded. */
-#define GBC_FAST_AUDIO_BATCH_DOTS 512U
-
 int gbc_set_run_mode(gbc_t *gbc, gbc_run_mode_t mode)
 {
     if (!gbc) return GBC_ERROR;
@@ -73,32 +69,6 @@ void gbc_fast_flush_audio(gbc_t *gbc)
 }
 #endif
 
-#if (GBC_ENABLE_FAST_RUN == 1)
-static uint8_t gbc_fast_idle_cycles(gbc_t *gbc, uint32_t remaining)
-{
-    uint32_t limit = remaining < 252 ? remaining : 252;
-    uint32_t event;
-    if ((gbc->mmu.io[0x40] & 0x80) && gbc->fast->next_dot > gbc->ppu.dot_cycles) {
-        event = (gbc->fast->next_dot - gbc->ppu.dot_cycles) << gbc->mmu.double_speed;
-        if (event < limit) limit = event;
-    } else if (gbc->mmu.io[0x40] & 0x80) return 4;
-    if (gbc->timer.tima_reload_delay && gbc->timer.tima_reload_delay < limit) limit = gbc->timer.tima_reload_delay;
-    if (gbc->mmu.io[0x07] & 4) {
-        static const uint16_t periods[4] = {1024, 16, 64, 256};
-        uint16_t period = periods[gbc->mmu.io[0x07] & 3];
-        event = period - (gbc->timer.div_counter & (period - 1));
-        if (event < limit) limit = event;
-    }
-    if (gbc->mmu.serial_cycles && gbc->mmu.serial_cycles < limit) limit = gbc->mmu.serial_cycles;
-    if (gbc->mmu.oam_dma_cycles && gbc->mmu.oam_dma_cycles < limit) limit = gbc->mmu.oam_dma_cycles;
-    event = (GBC_FAST_AUDIO_BATCH_DOTS - gbc->fast->apu_pending) << gbc->mmu.double_speed;
-    if (event < limit) limit = event;
-    /* HALT still observes events on its original four-clock boundary. */
-    limit = (limit + 3) & ~3UL;
-    return (uint8_t)(limit < 4 ? 4 : limit);
-}
-#endif
-
 uint32_t gbc_run_cycles(gbc_t *gbc, uint32_t budget)
 {
     uint32_t total = 0;
@@ -108,36 +78,7 @@ uint32_t gbc_run_cycles(gbc_t *gbc, uint32_t budget)
 #if (GBC_ENABLE_FAST_RUN == 1)
     if (gbc->run_mode == GBC_RUN_FAST) {
         gbc->running = 1;
-        do {
-            uint8_t cycles;
-            if (gbc->cpu.halted && !gbc->mmu.hdma_busy_cycles &&
-                !(gbc->mmu.ie & gbc->mmu.io[0x0F] & 0x1F)) {
-                cycles = gbc_fast_idle_cycles(gbc, budget - total);
-                gbc->cpu.cycles += cycles;
-            } else cycles = gbc_cpu_step(gbc);
-            uint8_t dots = gbc->mmu.double_speed ? (uint8_t)(cycles >> 1) : cycles;
-            if (gbc->mmu.oam_dma_cycles || gbc->mmu.hdma_busy_cycles) {
-                gbc_mmu_step_dma(gbc, cycles);
-            }
-            if (gbc->mmu.serial_cycles) {
-                gbc_mmu_step_serial(gbc, cycles);
-            }
-            gbc_fast_timer_advance(gbc, cycles);
-            gbc_fast_ppu_advance(gbc, dots);
-            gbc->fast->apu_pending += dots;
-            /* Bound audio/control latency even with the LCD disabled. */
-            if (gbc->fast->apu_pending >= GBC_FAST_AUDIO_BATCH_DOTS) gbc_fast_flush_audio(gbc);
-            total += cycles;
-            if (gbc->ppu.frame_ready) {
-                gbc->ppu.frame_ready = 0;
-                gbc->frame_count++;
-#if (GBC_FRAME_SKIP != 0)
-                if (gbc->gbc_frame_skip_count >= GBC_FRAME_SKIP) gbc->gbc_frame_skip_count = 0;
-                else gbc->gbc_frame_skip_count++;
-#endif
-                gbc_frame(gbc);
-            }
-        } while (!gbc->gbc_quit && total < budget);
+        total = gbc_cpu_fast_run(gbc, budget);
         gbc_fast_flush_audio(gbc);
         gbc->running = 0;
         return total;

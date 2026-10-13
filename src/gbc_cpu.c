@@ -4,6 +4,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 #include "gbc.h"
+#include "gbc_fast.h"
 
 #define CPU_A(cpu)       ((cpu)->af.hi)
 #define CPU_F(cpu)       ((cpu)->af.lo)
@@ -284,7 +285,7 @@ void gbc_cpu_request_interrupt(gbc_t *gbc, uint8_t bit)
     gbc_mmu_request_interrupt(gbc, (uint8_t)(1U << bit));
 }
 
-uint8_t gbc_cpu_step(gbc_t *gbc)
+GBC_INLINE uint8_t cpu_step_impl(gbc_t *gbc)
 {
     gbc_cpu_t *cpu = &gbc->cpu;
     uint8_t delayed_ime = cpu->ime_delay;
@@ -508,3 +509,73 @@ uint8_t gbc_cpu_step(gbc_t *gbc)
     return cycles;
 }
 
+uint8_t gbc_cpu_step(gbc_t *gbc)
+{
+    return cpu_step_impl(gbc);
+}
+
+#if (GBC_ENABLE_FAST_RUN == 1)
+static uint8_t gbc_fast_idle_cycles(gbc_t *gbc, uint32_t remaining)
+{
+    uint32_t limit = remaining < 252 ? remaining : 252;
+    uint32_t event;
+    if ((gbc->mmu.io[0x40] & 0x80) && gbc->fast->next_dot > gbc->ppu.dot_cycles) {
+        event = (gbc->fast->next_dot - gbc->ppu.dot_cycles) << gbc->mmu.double_speed;
+        if (event < limit) limit = event;
+    } else if (gbc->mmu.io[0x40] & 0x80) return 4;
+    if (gbc->timer.tima_reload_delay && gbc->timer.tima_reload_delay < limit) limit = gbc->timer.tima_reload_delay;
+    if (gbc->mmu.io[0x07] & 4) {
+        static const uint16_t periods[4] = {1024, 16, 64, 256};
+        uint16_t period = periods[gbc->mmu.io[0x07] & 3];
+        event = period - (gbc->timer.div_counter & (period - 1));
+        if (event < limit) limit = event;
+    }
+    if (gbc->mmu.serial_cycles && gbc->mmu.serial_cycles < limit) limit = gbc->mmu.serial_cycles;
+    if (gbc->mmu.oam_dma_cycles && gbc->mmu.oam_dma_cycles < limit) limit = gbc->mmu.oam_dma_cycles;
+    event = (GBC_FAST_AUDIO_BATCH_DOTS - gbc->fast->apu_pending) << gbc->mmu.double_speed;
+    if (event < limit) limit = event;
+    /* HALT still observes events on its original four-clock boundary. */
+    limit = (limit + 3) & ~3UL;
+    return (uint8_t)(limit < 4 ? 4 : limit);
+}
+#endif
+
+#if (GBC_ENABLE_FAST_RUN == 1)
+/* Same instruction-boundary scheduler, with CPU execution inlined inside
+ * the batch so registers/prologue are not saved for every instruction. */
+uint32_t gbc_cpu_fast_run(gbc_t *gbc, uint32_t budget)
+{
+    uint32_t total = 0;
+    do {
+        uint8_t cycles;
+        if (gbc->cpu.halted && !gbc->mmu.hdma_busy_cycles &&
+            !(gbc->mmu.ie & gbc->mmu.io[0x0F] & 0x1F)) {
+            cycles = gbc_fast_idle_cycles(gbc, budget - total);
+            gbc->cpu.cycles += cycles;
+        } else cycles = cpu_step_impl(gbc);
+        uint8_t dots = gbc->mmu.double_speed ? (uint8_t)(cycles >> 1) : cycles;
+        if (gbc->mmu.oam_dma_cycles || gbc->mmu.hdma_busy_cycles) {
+            gbc_mmu_step_dma(gbc, cycles);
+        }
+        if (gbc->mmu.serial_cycles) {
+            gbc_mmu_step_serial(gbc, cycles);
+        }
+        gbc_fast_timer_advance(gbc, cycles);
+        gbc_fast_ppu_advance(gbc, dots);
+        gbc->fast->apu_pending += dots;
+        /* Bound audio/control latency even with the LCD disabled. */
+        if (gbc->fast->apu_pending >= GBC_FAST_AUDIO_BATCH_DOTS) gbc_fast_flush_audio(gbc);
+        total += cycles;
+        if (gbc->ppu.frame_ready) {
+            gbc->ppu.frame_ready = 0;
+            gbc->frame_count++;
+#if (GBC_FRAME_SKIP != 0)
+            if (gbc->gbc_frame_skip_count >= GBC_FRAME_SKIP) gbc->gbc_frame_skip_count = 0;
+            else gbc->gbc_frame_skip_count++;
+#endif
+            gbc_frame(gbc);
+        }
+    } while (!gbc->gbc_quit && total < budget);
+    return total;
+}
+#endif

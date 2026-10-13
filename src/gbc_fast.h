@@ -15,6 +15,9 @@ typedef struct gbc_fast {
     uint8_t sprites[10], sprite_count; /* Mode-2 selection in OAM order */
 } gbc_fast_t;
 typedef char gbc_fast_workspace_must_fit_64k[(sizeof(gbc_fast_t) <= 65536) ? 1 : -1];
+/* Nominal 0.122 ms audio settlement, plus whole-instruction overshoot. */
+#define GBC_FAST_AUDIO_BATCH_DOTS 512U
+uint32_t gbc_cpu_fast_run(gbc_t *gbc, uint32_t budget);
 void gbc_fast_rebuild(gbc_t *gbc);
 void gbc_fast_flush_audio(gbc_t *gbc);
 void gbc_apu_fast_step(gbc_t *gbc, uint32_t cycles);
