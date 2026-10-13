@@ -116,9 +116,13 @@ uint32_t gbc_run_cycles(gbc_t *gbc, uint32_t budget)
                 gbc->cpu.cycles += cycles;
             } else cycles = gbc_cpu_step(gbc);
             uint8_t dots = gbc->mmu.double_speed ? (uint8_t)(cycles >> 1) : cycles;
-            gbc_mmu_step_dma(gbc, cycles);
-            gbc_mmu_step_serial(gbc, cycles);
-            gbc_timer_step(gbc, cycles);
+            if (gbc->mmu.oam_dma_cycles || gbc->mmu.hdma_busy_cycles) {
+                gbc_mmu_step_dma(gbc, cycles);
+            }
+            if (gbc->mmu.serial_cycles) {
+                gbc_mmu_step_serial(gbc, cycles);
+            }
+            gbc_fast_timer_advance(gbc, cycles);
             gbc_fast_ppu_advance(gbc, dots);
             gbc->fast->apu_pending += dots;
             /* Bound audio/control latency even with the LCD disabled. */

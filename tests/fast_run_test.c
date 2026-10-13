@@ -396,6 +396,37 @@ static void test_ppu_inline_equivalence(void)
         gbc_deinit_static(&a); gbc_deinit_static(&b);
     }
 }
+static void test_idle_peripheral_equivalence(void)
+{
+    static gbc_t a, b;
+    fast_setup(&a, GBC_MODEL_CGB); fast_setup(&b, GBC_MODEL_CGB);
+    for (unsigned i = 0; i < 30000; i++) {
+        a.timer.div_counter = (uint16_t)((random_byte() << 8) | random_byte());
+        a.timer.tima_reload_delay = (i & 7) ? 0 : (uint8_t)(1 + (i & 3));
+        a.mmu.io[0x07] = random_byte() & 7;
+        a.mmu.io[0x04] = random_byte(); /* zero clocks must leave stale DIV alone */
+        a.mmu.io[0x05] = random_byte(); a.mmu.io[0x06] = random_byte();
+        a.mmu.io[0x0F] = random_byte();
+        a.mmu.oam_dma_cycles = (i & 1) ? 0 : random_byte();
+        a.mmu.serial_cycles = (i & 2) ? 0 : random_byte();
+        /* Cover HDMA retirement and the inactive blocks-with-zero-budget case. */
+        a.mmu.hdma_busy_cycles = (i & 3) ? 0 : (uint8_t)(1 + (i & 15));
+        a.mmu.hdma_blocks = 0;
+        a.mmu.hdma_src = 0; a.mmu.hdma_dst = 0;
+        a.cpu.halted = random_byte() & 1;
+        b.timer = a.timer; b.mmu = a.mmu; b.cpu = a.cpu;
+        uint8_t clocks = random_byte();
+        if (a.mmu.oam_dma_cycles || a.mmu.hdma_busy_cycles) gbc_mmu_step_dma(&a, clocks);
+        if (a.mmu.serial_cycles) gbc_mmu_step_serial(&a, clocks);
+        gbc_fast_timer_advance(&a, clocks);
+        gbc_mmu_step_dma(&b, clocks); gbc_mmu_step_serial(&b, clocks); gbc_timer_step(&b, clocks);
+        expect_int("idle peripherals timer", memcmp(&a.timer, &b.timer, sizeof(a.timer)), 0);
+        expect_int("idle peripherals MMU", memcmp(&a.mmu, &b.mmu, sizeof(a.mmu)), 0);
+        expect_int("idle peripherals CPU", memcmp(&a.cpu, &b.cpu, sizeof(a.cpu)), 0);
+    }
+    gbc_unload_rom_discard(&a); gbc_unload_rom_discard(&b);
+    gbc_deinit_static(&a); gbc_deinit_static(&b);
+}
 int main(void)
 {
     core_reference_suite();
@@ -408,6 +439,7 @@ int main(void)
     test_late_ly_write_selection();
     test_random_scanlines();
     test_ppu_inline_equivalence();
+    test_idle_peripheral_equivalence();
     printf("fast workspace=%u bytes; fast tests %s\n", (unsigned)sizeof(gbc_fast_t), test_failures ? "FAILED" : "passed");
     return test_failures ? 1 : 0;
 }

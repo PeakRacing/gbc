@@ -19,6 +19,18 @@ void gbc_fast_rebuild(gbc_t *gbc);
 void gbc_fast_flush_audio(gbc_t *gbc);
 void gbc_apu_fast_step(gbc_t *gbc, uint32_t cycles);
 void gbc_ppu_fast_step(gbc_t *gbc, uint8_t cycles);
+/* With TAC disabled and no pending reload, DIV is the only changing state.
+ * MMIO writes still use the original edge/reload handlers. */
+GBC_INLINE void gbc_fast_timer_advance(gbc_t *gbc, uint8_t cycles)
+{
+    if (!cycles) return;
+    if ((gbc->mmu.io[0x07] & 4) || gbc->timer.tima_reload_delay) {
+        gbc_timer_step(gbc, cycles);
+    } else {
+        gbc->timer.div_counter = (uint16_t)(gbc->timer.div_counter + cycles);
+        gbc->mmu.io[0x04] = (uint8_t)(gbc->timer.div_counter >> 8);
+    }
+}
 /* Most CPU instructions cannot reach a PPU event. Keep this small path in
  * the scheduler; mode/LY/IRQ/DMA/render events still use the original handler. */
 GBC_INLINE void gbc_fast_ppu_advance(gbc_t *gbc, uint8_t cycles)
