@@ -368,8 +368,6 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
         uint8_t line;
         uint8_t bank = (model == GBC_MODEL_CGB && (attr & 0x08)) ? 1 : 0;
 
-        if (sx <= -8 || sx >= GBC_WIDTH) continue;
-
         line = (uint8_t)(ly - sy);
         if (attr & 0x40) {
             line = (uint8_t)(sprite_height - 1 - line);
@@ -377,33 +375,6 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
         if (sprite_height == 16) {
             tile &= 0xFE;
         }
-#if (GBC_ENABLE_FAST_RUN == 1)
-        const uint8_t *indices = NULL;
-        const gbc_color_t *colors = NULL;
-#if (GBC_ENABLE_BOOT_ROM == 1)
-        gbc_color_t compat[4];
-#endif
-        if (gbc->fast && gbc->fast->rendering) {
-            /* A sprite uses one tile row and one palette. Resolve both once,
-             * rather than checking/decoding the same row for every pixel. */
-            uint16_t offset = (uint16_t)(tile * 16 + line * 2);
-            (void)gbc_ppu_tile_pixel(gbc, (uint16_t)(tile * 16), 0, line, bank);
-            indices = gbc->fast->tiles[bank][offset >> 4][(offset >> 1) & 7];
-            if (model == GBC_MODEL_CGB) colors = gbc->fast->obj + (attr & 7) * 4;
-            else {
-#if (GBC_ENABLE_BOOT_ROM == 1)
-                if (gbc->boot_compat) {
-                    uint8_t palette = (attr & 0x10) ? io[0x49] : io[0x48];
-                    unsigned base = (attr & 0x10) ? 4 : 0;
-                    for (unsigned id = 0; id < 4; id++)
-                        compat[id] = gbc->fast->obj[base + ((palette >> (id * 2)) & 3)];
-                    colors = compat;
-                } else
-#endif
-                colors = gbc->fast->dmg[(attr & 0x10) ? 2 : 1];
-            }
-        }
-#endif
         for (uint8_t px = 0; px < 8; px++) {
             int16_t screen_x = sx + px;
             uint8_t tx = (attr & 0x20) ? (uint8_t)(7 - px) : px;
@@ -415,10 +386,6 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
             if (ppu->obj_drawn[screen_x]) {
                 continue;
             }
-#if (GBC_ENABLE_FAST_RUN == 1)
-            if (indices) color_id = indices[tx];
-            else
-#endif
             color_id = gbc_ppu_tile_pixel(gbc, (uint16_t)(tile * 16), tx, line, bank);
             if (color_id == 0) {
                 continue;
@@ -430,12 +397,6 @@ static void gbc_ppu_render_sprites(gbc_t *gbc, uint8_t ly)
             if (bg_priority_enabled && model == GBC_MODEL_CGB && ppu->bg_priority[screen_x] && ppu->bg_color_id[screen_x] != 0) {
                 continue;
             }
-#if (GBC_ENABLE_FAST_RUN == 1)
-            if (colors) {
-                ppu->line[screen_x] = colors[color_id];
-                continue;
-            }
-#endif
             if (model == GBC_MODEL_CGB) {
                 ppu->line[screen_x] = gbc_ppu_obj_color(gbc, attr & 0x07, color_id);
             } else {
