@@ -234,6 +234,79 @@ static void test_audio_batch_partition(void)
     gbc_deinit_static(&a);
 }
 
+static void test_audio_sequencer_boundary(void)
+{
+    static gbc_t fast, unit;
+    for (unsigned negative = 0; negative < 2; negative++) {
+        fast_setup(&fast, 1);
+        gbc_apu_write(&fast, 0x26, 0x80);
+        gbc_apu_write(&fast, 0x24, 0x77); gbc_apu_write(&fast, 0x25, 0x11);
+        gbc_apu_write(&fast, 0x10, (uint8_t)(0x11 | (negative ? 8 : 0)));
+        gbc_apu_write(&fast, 0x11, 0x80); gbc_apu_write(&fast, 0x12, 0xF0);
+        gbc_apu_write(&fast, 0x13, 0xE8); gbc_apu_write(&fast, 0x14, 0x83); /* 1000 */
+        fast.apu.frame_step = 2;
+        fast.apu.frame_acc = GBC_CPU_CLOCK_FREQ - 100U * 512U;
+        fast.apu.sample_acc = 0;
+        fast.apu.square1.timer = 10;
+        fast.apu.square1.sweep_timer = 1;
+        unit = fast; unit.fast = NULL; unit.run_mode = GBC_RUN_REFERENCE;
+        gbc_apu_fast_step(&fast, 100);
+        for (unsigned i = 0; i < 100; i++) gbc_apu_step(&unit, 1);
+        /* The timer reload at clock 10 uses frequency 1000; a sweep at
+         * clock 100 must not retroactively change that reload's period. */
+        expect_u16("sweep preserves earlier timer reload", fast.apu.square1.timer, 4102);
+        expect_int("sweep boundary unit state", memcmp(&fast.apu, &unit.apu, sizeof(fast.apu)), 0);
+        pcm_frames = 0; pcm_hash = 2166136261U;
+        for (unsigned i = 0; i < 262144; i += 512) gbc_apu_fast_step(&fast, 512);
+        uint32_t count = pcm_frames, hash = pcm_hash;
+        pcm_frames = 0; pcm_hash = 2166136261U;
+        for (unsigned i = 0; i < 262144; i++) gbc_apu_step(&unit, 1);
+        expect_int("sweep unit PCM count", pcm_frames, count);
+        expect_int("sweep unit PCM bytes", pcm_hash == hash, 1);
+        expect_int("sweep unit phase/state", memcmp(&fast.apu, &unit.apu, sizeof(fast.apu)), 0);
+        gbc_deinit_static(&fast);
+    }
+}
+
+static void test_audio_all_channel_unit_clock(void)
+{
+    static gbc_t fast, unit;
+    static const uint8_t steps[] = {0, 2, 7}; /* length, sweep, envelope */
+    for (unsigned scenario = 0; scenario < sizeof(steps); scenario++) {
+        fast_setup(&fast, 1);
+        gbc_apu_write(&fast, 0x26, 0x80);
+        gbc_apu_write(&fast, 0x24, 0x77); gbc_apu_write(&fast, 0x25, 0xFF);
+        gbc_apu_write(&fast, 0x10, 0x19);
+        gbc_apu_write(&fast, 0x11, 0x80); gbc_apu_write(&fast, 0x12, 0xF1);
+        gbc_apu_write(&fast, 0x13, 0xE8); gbc_apu_write(&fast, 0x14, 0xC3);
+        gbc_apu_write(&fast, 0x16, 0x40); gbc_apu_write(&fast, 0x17, 0x91);
+        gbc_apu_write(&fast, 0x18, 0x71); gbc_apu_write(&fast, 0x19, 0xC6);
+        for (unsigned i = 0; i < 16; i++) fast.mmu.io[0x30 + i] = (uint8_t)(i * 17);
+        gbc_apu_write(&fast, 0x1A, 0x80); gbc_apu_write(&fast, 0x1C, 0x20);
+        gbc_apu_write(&fast, 0x1D, 0x91); gbc_apu_write(&fast, 0x1E, 0xC7);
+        gbc_apu_write(&fast, 0x21, 0xE9); gbc_apu_write(&fast, 0x22, 0x09);
+        gbc_apu_write(&fast, 0x23, 0xC0);
+        fast.apu.frame_step = steps[scenario];
+        fast.apu.frame_acc = GBC_CPU_CLOCK_FREQ - 173U * 512U;
+        fast.apu.sample_acc = GBC_CPU_CLOCK_FREQ - 61U * GBC_APU_SAMPLE_RATE;
+        if (!scenario) {
+            fast.apu.square1.length_counter = fast.apu.square2.length_counter = 1;
+            fast.apu.wave.length_counter = fast.apu.noise.length_counter = 1;
+        }
+        unit = fast; unit.fast = NULL; unit.run_mode = GBC_RUN_REFERENCE;
+        pcm_frames = 0; pcm_hash = 2166136261U;
+        for (unsigned i = 0; i < 131072; i += 512) gbc_apu_fast_step(&fast, 512);
+        uint32_t count = pcm_frames, hash = pcm_hash;
+        pcm_frames = 0; pcm_hash = 2166136261U;
+        for (unsigned i = 0; i < 131072; i++) gbc_apu_step(&unit, 1);
+        expect_int("all-channel unit PCM count", pcm_frames, count);
+        expect_int("all-channel unit PCM bytes", pcm_hash == hash, 1);
+        expect_int("all-channel unit phase/state", memcmp(&fast.apu, &unit.apu, sizeof(fast.apu)), 0);
+        expect_int("all-channel unit IO", memcmp(fast.mmu.io, unit.mmu.io, sizeof(fast.mmu.io)), 0);
+        gbc_deinit_static(&fast);
+    }
+}
+
 static void test_late_ly_write_selection(void)
 {
     gbc_t fast, ref;
@@ -296,7 +369,7 @@ static void test_ppu_inline_equivalence(void)
     static gbc_t a, b;
     static const uint8_t registers[] = {0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x47, 0x4A, 0x4B};
     for (unsigned model = 0; model < 2; model++) {
-        fast_setup(&a, model); fast_setup(&b, model);
+        fast_setup(&a, (uint8_t)model); fast_setup(&b, (uint8_t)model);
         for (unsigned i = 0; i < sizeof(a.mmu.vram); i++)
             ((uint8_t *)a.mmu.vram)[i] = ((uint8_t *)b.mmu.vram)[i] = random_byte();
         for (unsigned i = 0; i < sizeof(a.mmu.oam); i++)
@@ -330,6 +403,8 @@ int main(void)
     test_instruction_and_idle_equivalence(); test_audio_events();
     test_dma_stat_and_palette();
     test_audio_batch_partition();
+    test_audio_sequencer_boundary();
+    test_audio_all_channel_unit_clock();
     test_late_ly_write_selection();
     test_random_scanlines();
     test_ppu_inline_equivalence();

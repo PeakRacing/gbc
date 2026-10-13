@@ -641,6 +641,11 @@ void gbc_apu_fast_step(gbc_t *gbc, uint32_t cycles)
         if (apu->enabled) {
             uint32_t to_frame = (GBC_CPU_CLOCK_FREQ - apu->frame_acc + 511) / 512;
             if (to_frame < part) part = to_frame;
+            /* The reference clocks the sequencer before oscillators. Keep
+             * its event-edge order, but settle preceding clocks separately:
+             * a sweep/length event must not affect the whole preceding span.
+             * The final single clock retains the existing event model. */
+            if (part == to_frame && part > 1) part--;
         }
         if (part > 255) part = 255;
         /* Same length/envelope/sweep order as the reference, now bounded by
