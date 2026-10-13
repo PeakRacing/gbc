@@ -136,3 +136,9 @@ gbc_load_rom(gbc, rom_data, rom_size);
 在 `sdl/sdl2` 执行 `xmake build low_memory_test && xmake run low_memory_test`，
 验证 RGB565 逐行绘制、DMG bank 边界、ROM 引用生命周期，以及关闭文件系统、声音和
 SRAM 后的零实例/卡带/热路径分配。主机测试不代表真实单片机帧率或栈占用。
+
+## 可选音频播放适配
+
+低性能 MCU 可在移植层选用 `port/gbc_audio_stretch.h` 的整数立体声时间拉伸，
+减少模拟速度波动时的补零欠载。参见[接口约束与实测限制](docs/audio_stretch.md)。
+该模块不提升模拟帧率，不修改核心和 SDL 的默认播放策略。

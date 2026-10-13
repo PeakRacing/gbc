@@ -183,3 +183,9 @@ CPU clocks while retaining 4-clock peripheral/PCM granularity. See
 [performance review](docs/performance_review.md) for checks and board results.
 Run `python tests/performance_regression.py --render-matrix` for the expanded
 renderer and idle HALT differential matrix.
+
+## Optional playback adaptation
+
+MCU ports with variable production speed can opt into the integer stereo PCM
+helper in `port/gbc_audio_stretch.h`. See [its integration contract and measured
+limitations](docs/audio_stretch.md). Core and SDL playback defaults are unchanged.
