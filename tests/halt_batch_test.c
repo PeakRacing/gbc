@@ -52,4 +52,3 @@ int main(void) {
     printf("HALT differential PASS cases=12000 batch=%u max=%u sound=%u\n", batched, GBC_HALT_BATCH_CYCLES, GBC_ENABLE_SOUND);
     return 0;
 }
-
